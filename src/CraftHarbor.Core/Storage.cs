@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace CraftHarbor.Core;
@@ -50,7 +51,26 @@ public sealed class HarborStore
         var p = new ServerProfile { Name = name };
         Directory.CreateDirectory(ServerDir(p)); Profiles.Add(p); Save(); return p;
     }
+    public bool Remove(ServerProfile profile)
+    {
+        var index = Profiles.IndexOf(profile);
+        if (index < 0) return false;
+        Profiles.RemoveAt(index);
+        try { Save(); return true; }
+        catch { Profiles.Insert(index, profile); throw; }
+    }
+    public int ReconcileMissingServerFolders(Func<ServerProfile, bool>? keep = null)
+    {
+        var missing = Profiles.Where(p => !Directory.Exists(ServerDir(p)) && (keep == null || !keep(p))).ToArray();
+        if (missing.Length == 0) return 0;
+        var original = Profiles.ToArray();
+        Profiles.RemoveAll(p => missing.Contains(p));
+        try { Save(); return missing.Length; }
+        catch { Profiles.Clear(); Profiles.AddRange(original); throw; }
+    }
 }
+
+public readonly record struct SnapshotProgress(int FilesDone, int FilesTotal, long BytesDone, long BytesTotal);
 
 public static class SafeFiles
 {
@@ -108,15 +128,51 @@ public static class SafeFiles
             input.CopyTo(output);
         }
     }
-    public static string Snapshot(string source, string destination)
+    public static string Snapshot(string source, string destination, IProgress<SnapshotProgress>? progress = null,
+        CancellationToken cancellationToken = default, CompressionLevel compression = CompressionLevel.Fastest)
     {
+        var files = new List<(string Path, long Size)>();
+        foreach (var file in Files(source))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            files.Add((file, new FileInfo(file).Length));
+        }
+        var total = files.Sum(f => f.Size);
+        progress?.Report(new SnapshotProgress(0, files.Count, 0, total));
+        cancellationToken.ThrowIfCancellationRequested();
         Directory.CreateDirectory(destination);
         var path = Path.Combine(destination, DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..6] + ".zip");
         var tmp = path + ".partial";
         try
         {
+            long done = 0; int filesDone = 0; var lastReport = Stopwatch.GetTimestamp();
+            var buffer = new byte[1024 * 1024];
             using (var archive = ZipFile.Open(tmp, ZipArchiveMode.Create))
-                foreach (var file in Files(source)) archive.CreateEntryFromFile(file, Path.GetRelativePath(source, file), CompressionLevel.Fastest);
+                foreach (var file in files)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var entry = archive.CreateEntry(Path.GetRelativePath(source, file.Path).Replace('\\', '/'), compression);
+                    using var input = new FileStream(file.Path, FileMode.Open, FileAccess.Read, FileShare.Read, buffer.Length, FileOptions.SequentialScan);
+                    using var output = entry.Open();
+                    int read;
+                    while ((read = input.Read(buffer)) != 0)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        output.Write(buffer, 0, read); done += read;
+                        if (Stopwatch.GetElapsedTime(lastReport).TotalMilliseconds >= 100)
+                        {
+                            progress?.Report(new SnapshotProgress(filesDone, files.Count, done, total));
+                            lastReport = Stopwatch.GetTimestamp();
+                        }
+                    }
+                    filesDone++;
+                    if (filesDone == files.Count || Stopwatch.GetElapsedTime(lastReport).TotalMilliseconds >= 100)
+                    {
+                        progress?.Report(new SnapshotProgress(filesDone, files.Count, done, total));
+                        lastReport = Stopwatch.GetTimestamp();
+                    }
+                }
+            cancellationToken.ThrowIfCancellationRequested();
             File.Move(tmp, path); return path;
         }
         finally { if (File.Exists(tmp)) File.Delete(tmp); }

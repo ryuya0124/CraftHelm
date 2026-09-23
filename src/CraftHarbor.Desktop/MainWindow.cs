@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Controls;
@@ -23,13 +24,14 @@ public sealed class MainWindow : Window
     private readonly Dictionary<string, ServerRuntime> runtimes = [];
     private readonly ListBox servers = new();
     private readonly StackPanel page = new();
-    private readonly WrapPanel navigationGroups = new() { Name = "NavigationGroups" };
-    private readonly WrapPanel navigationPages = new() { Name = "NavigationPages" };
+    private readonly StackPanel navigationLinks = new() { Name = "NavigationLinks" };
     private static readonly (string Group, string Label, string Key)[] Routes = [
         ("運用", "概要", "overview"), ("運用", "コンソール", "console"), ("運用", "バックアップ", "backups"),
-        ("サーバー設定", "起動・導入", "launch"), ("サーバー設定", "ゲーム・接続", "properties"), ("サーバー設定", "Javaの管理", "java"),
-        ("MOD・プラグイン", "導入・構成", "mods"), ("MOD・プラグイン", "MODの設定", "modsettings"), ("MOD・プラグイン", "詳細なテキスト編集", "files"),
-        ("アプリ設定", "表示", "appearance"), ("アプリ設定", "更新", "updates"), ("アプリ設定", "接続診断・PC情報", "system"), ("アプリ設定", "ガイド・保存場所", "help")
+        ("サーバー", "種類とバージョン", "launch"), ("サーバー", "Java・メモリ・ポート", "resources"), ("サーバー", "起動引数", "advanced"),
+        ("サーバー", "本体の導入", "install"), ("サーバー", "フォルダの取り込み", "import"), ("サーバー", "ゲーム・接続設定", "properties"), ("サーバー", "サーバーを削除", "manage"),
+        ("MOD・プラグイン", "インストール済み", "mods"), ("MOD・プラグイン", "MODを検索", "modsearch"), ("MOD・プラグイン", "構成プリセット", "presets"),
+        ("MOD・プラグイン", "MODパック", "modpacks"), ("MOD・プラグイン", "AutoModpack", "automodpack"), ("MOD・プラグイン", "MODの設定", "modsettings"), ("MOD・プラグイン", "テキスト編集", "files"),
+        ("アプリ設定", "表示", "appearance"), ("アプリ設定", "更新", "updates"), ("アプリ設定", "Javaの管理", "java"), ("アプリ設定", "PC情報", "system"), ("アプリ設定", "接続診断", "network"), ("アプリ設定", "ガイド", "help")
     ];
     private readonly TextBlock title = new() { FontSize = 28, FontWeight = FontWeights.Bold };
     private readonly TextBlock subtitle = new() { Foreground = Brush("#91A3B8"), Margin = new Thickness(0, 8, 0, 20) };
@@ -42,6 +44,7 @@ public sealed class MainWindow : Window
     private string currentPage = "overview";
     private Func<bool>? mayLeave;
     private bool restoringSelection;
+    private int reconcileTicks;
     private ServerProfile? Selected => servers.SelectedItem as ServerProfile;
     private ServerRuntime Runtime(ServerProfile p)
     {
@@ -63,10 +66,11 @@ public sealed class MainWindow : Window
         brand.Children.Add(Btn("＋ サーバーを追加", AddServer, true)); brand.Children.Add(new TextBlock { Text = "サーバー", Foreground = Brush("#91A3B8"), Margin = new Thickness(0, 12, 0, 8) });
         DockPanel.SetDock(brand, Dock.Top); sidebar.Children.Add(brand);
         var footer = new StackPanel { Margin = new Thickness(20) };
-        footer.Children.Add(Text("サーバーを選び、右側の分類から操作できます。", 12));
         footer.Children.Add(Btn("アプリ設定", () => Navigate("appearance")));
-        footer.Children.Add(new TextBlock { Text = "v0.1.10  •  Windows版", FontSize = 11, Foreground = Brush("#91A3B8") });
-        DockPanel.SetDock(footer, Dock.Bottom); sidebar.Children.Add(footer); servers.Margin = new Thickness(12, 0, 12, 8); sidebar.Children.Add(servers);
+        footer.Children.Add(new TextBlock { Text = "v" + typeof(App).Assembly.GetName().Version!.ToString(3) + "  •  Windows版", FontSize = 11, Foreground = Brush("#91A3B8") });
+        DockPanel.SetDock(footer, Dock.Bottom); sidebar.Children.Add(footer);
+        servers.Margin = new Thickness(12, 0, 12, 8); servers.Height = 150; DockPanel.SetDock(servers, Dock.Top); sidebar.Children.Add(servers);
+        sidebar.Children.Add(new ScrollViewer { Content = navigationLinks, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
         servers.SelectionChanged += (_, e) =>
         {
             if (busy || restoringSelection) return;
@@ -80,23 +84,25 @@ public sealed class MainWindow : Window
         };
         var main = new DockPanel { Margin = new Thickness(30, 26, 30, 16) }; Grid.SetColumn(main, 1); layout.Children.Add(main);
         var header = new StackPanel(); header.Children.Add(title); header.Children.Add(subtitle); DockPanel.SetDock(header, Dock.Top); main.Children.Add(header);
-        var nav = new StackPanel(); nav.Children.Add(navigationGroups); nav.Children.Add(navigationPages);
-        DockPanel.SetDock(nav, Dock.Top); main.Children.Add(nav);
         var bottom = new DockPanel { Margin = new Thickness(0, 12, 0, 0) };
         var cancel = Btn("処理をキャンセル", () => operation?.Cancel()); DockPanel.SetDock(cancel, Dock.Right); bottom.Children.Add(cancel); bottom.Children.Add(status);
         DockPanel.SetDock(bottom, Dock.Bottom); main.Children.Add(bottom);
         main.Children.Add(new ScrollViewer { Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
-        RefreshServers(); Navigate("overview");
+        store.ReconcileMissingServerFolders(); RefreshServers(); Navigate("overview");
         timer.Tick += (_, _) => Tick(); timer.Start(); Closing += OnClosing;
     }
     private void RefreshServers(ServerProfile? select = null)
     {
-        var selection = select ?? Selected; servers.ItemsSource = null; servers.ItemsSource = store.Profiles; servers.SelectedItem = selection ?? store.Profiles.FirstOrDefault();
+        var selection = select ?? Selected;
+        restoringSelection = true;
+        servers.ItemsSource = null; servers.ItemsSource = store.Profiles;
+        servers.SelectedItem = selection != null && store.Profiles.Contains(selection) ? selection : store.Profiles.FirstOrDefault();
+        restoringSelection = false;
     }
-    private Button Btn(string text, Action action, bool accent = false)
+    private Button Btn(string text, Action action, bool accent = false, bool allowWhileBusy = false)
     {
         var button = new Button { Content = text }; if (accent) { button.Background = Brush("#61DBC4"); button.Foreground = Brush("#102823"); }
-        button.Click += (_, _) => { if (busy && text != "処理をキャンセル") { status.Text = "処理中です。完了を待つかキャンセルしてください。"; return; } try { action(); } catch (Exception ex) { Error(ex); } }; return button;
+        button.Click += (_, _) => { if (busy && text != "処理をキャンセル" && !allowWhileBusy) { status.Text = "処理中です。完了を待つかキャンセルしてください。"; return; } try { action(); } catch (Exception ex) { Error(ex); } }; return button;
     }
     private Button AsyncBtn(string text, Func<CancellationToken, Task> action, bool accent = false) => Btn(text, () => _ = Run(action), accent);
     private Button CommandButton(string command, ServerRuntime runtime)
@@ -106,36 +112,20 @@ public sealed class MainWindow : Window
     }
     private void RefreshNavigation(string key)
     {
-        var selected = Routes.First(r => r.Key == key);
-        navigationGroups.Children.Clear(); navigationPages.Children.Clear();
+        navigationLinks.Children.Clear();
         foreach (var group in Routes.Select(r => r.Group).Distinct())
         {
-            var button = Btn(group, () => Navigate(Routes.First(r => r.Group == group).Key), group == selected.Group);
-            button.Tag = group; navigationGroups.Children.Add(button);
+            navigationLinks.Children.Add(new TextBlock { Text = group, Foreground = Brush("#91A3B8"), FontSize = 12, Margin = new Thickness(20, 14, 0, 5) });
+            foreach (var route in Routes.Where(r => r.Group == group))
+            {
+                var button = Btn(route.Label, () => Navigate(route.Key), route.Key == key);
+                button.Name = "Nav" + route.Key;
+                button.HorizontalAlignment = HorizontalAlignment.Stretch;
+                button.HorizontalContentAlignment = HorizontalAlignment.Left;
+                button.Margin = new Thickness(12, 2, 12, 2);
+                navigationLinks.Children.Add(button);
+            }
         }
-        foreach (var route in Routes.Where(r => r.Group == selected.Group))
-        {
-            var button = Btn(route.Label, () => Navigate(route.Key)); button.Tag = route.Key;
-            button.FontWeight = route.Key == key ? FontWeights.Bold : FontWeights.Normal;
-            navigationPages.Children.Add(button);
-        }
-    }
-    private void OrganizeCards(string? first = null)
-    {
-        var cards = page.Children.OfType<Border>().Where(b => b.Child is StackPanel).ToArray();
-        var selector = new WrapPanel { Name = "SectionCategories", Margin = new Thickness(0, 8, 0, 0) };
-        page.Children.Insert(0, selector);
-        void Select(Border selected)
-        {
-            foreach (var card in cards) card.Visibility = card == selected ? Visibility.Visible : Visibility.Collapsed;
-            foreach (var button in selector.Children.OfType<Button>()) button.FontWeight = ReferenceEquals(button.Tag, selected) ? FontWeights.Bold : FontWeights.Normal;
-        }
-        foreach (var card in cards)
-        {
-            var label = ((StackPanel)card.Child).Children.OfType<TextBlock>().First().Text;
-            var button = Btn(label, () => Select(card)); button.Tag = card; selector.Children.Add(button);
-        }
-        if (cards.Length > 0) Select(cards.FirstOrDefault(c => ((StackPanel)c.Child).Children.OfType<TextBlock>().First().Text == first) ?? cards[0]);
     }
     private async Task Run(Func<CancellationToken, Task> action)
     {
@@ -165,12 +155,12 @@ public sealed class MainWindow : Window
     {
         if (busy || (mayLeave != null && !mayLeave())) return; mayLeave = null; currentPage = key; page.Children.Clear(); console = null; updateStatus = null;
         RefreshNavigation(key);
-        title.Text = key switch { "java" => "Javaの管理", "system" => "ネットワーク・システム", "help" => "CraftHelm ガイド", "appearance" => "表示設定", _ => Selected?.Name ?? "サーバーのための、小さな港。" };
+        title.Text = key switch { "java" => "Javaの管理", "system" => "PC情報", "network" => "接続診断", "help" => "CraftHelm ガイド", "appearance" => "表示設定", _ => Selected?.Name ?? "サーバーを追加" };
         var route = Routes.First(r => r.Key == key);
         subtitle.Text = route.Group + " › " + route.Label + (Selected is { } p ? $"  •  {JapaneseDisplay.Label(p.Engine)} / Minecraft {p.Version}" : "");
-        if (key == "updates") { UpdatesPage(); return; } if (key == "java") { JavaPage(); return; } if (key == "system") { SystemPage(); return; } if (key == "help") { HelpPage(); return; } if (key == "appearance") { AppearancePage(); return; }
+        if (key == "updates") { UpdatesPage(); return; } if (key == "java") { JavaPage(); return; } if (key == "system") { SystemPage(); return; } if (key == "network") { NetworkPage(); return; } if (key == "help") { HelpPage(); return; } if (key == "appearance") { AppearancePage(); return; }
         if (Selected == null) { Welcome(); return; }
-        switch (key) { case "console": ConsolePage(); break; case "launch": LaunchPage(); break; case "mods": ModsPage(); break; case "modsettings": ModSettingsPage(); break; case "properties": PropertiesPage(); break; case "files": FilesPage(); break; case "backups": BackupsPage(); break; default: Overview(); break; }
+        switch (key) { case "console": ConsolePage(); break; case "launch": LaunchPage(); break; case "resources": ResourcesPage(); break; case "advanced": AdvancedPage(); break; case "install": InstallPage(); break; case "import": ImportPage(); break; case "manage": ManagePage(); break; case "mods": ModsPage(); break; case "modsearch": ModSearchPage(); break; case "presets": PresetsPage(); break; case "modpacks": ModpacksPage(); break; case "automodpack": AutoModpackPage(); break; case "modsettings": ModSettingsPage(); break; case "properties": PropertiesPage(); break; case "files": FilesPage(); break; case "backups": BackupsPage(); break; default: Overview(); break; }
     }
     private void Welcome()
     {
@@ -184,6 +174,25 @@ public sealed class MainWindow : Window
     {
         var name = Ask("サーバー名", "マイサーバー"); if (string.IsNullOrWhiteSpace(name)) return;
         var p = store.Add(name); RefreshServers(p); Navigate("launch");
+    }
+    private void ManagePage()
+    {
+        var p = Selected!; var directory = store.ServerDir(p);
+        var card = Card(page, "選択サーバーを削除");
+        card.Children.Add(Text($"対象: {p.Name}\n保存先: {directory}"));
+        card.Children.Add(Text("削除は選択中のサーバーだけが対象です。稼働中は削除できません。バックアップとログは残します。", 12));
+        card.Children.Add(Btn("一覧からのみ削除", () =>
+        {
+            Stopped(p); if (!Confirm($"{p.Name} を一覧から削除しますか？ サーバーフォルダは残ります。")) return;
+            store.Remove(p); RefreshServers(); Navigate("overview"); status.Text = "一覧から削除しました";
+        }));
+        card.Children.Add(AsyncBtn("サーバーフォルダもゴミ箱へ移動", async ct =>
+        {
+            Stopped(p); if (!Confirm($"{p.Name} の登録とサーバーフォルダを削除しますか？\n{directory}\nフォルダはWindowsのゴミ箱へ移動します。バックアップは残ります。")) return;
+            if (Directory.Exists(directory)) await Task.Run(() => Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(directory,
+                Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin), ct);
+            store.Remove(p); RefreshServers(); _ = Dispatcher.BeginInvoke(() => Navigate("overview"), DispatcherPriority.Background);
+        }));
     }
     private string? Ask(string label, string initial)
     {
@@ -202,9 +211,8 @@ public sealed class MainWindow : Window
         row.Children.Add(Btn("フォルダを開く", () => Open(store.ServerDir(p)))); card.Children.Add(row); if (metrics.Parent is Panel previous) previous.Children.Remove(metrics); card.Children.Add(metrics);
         var info = Card(page, "このサーバーの構成"); info.Children.Add(Text($"種類: {JapaneseDisplay.Label(p.Engine)}   Minecraft: {p.Version}\nメモリ: {p.MinMemoryMb} – {p.MaxMemoryMb} MB\nJava: {p.JavaPath}\n起動: {(p.LaunchArgs.Length == 0 ? p.Jar : string.Join(" ", p.LaunchArgs))}\n保存先: {store.ServerDir(p)}"));
         info.Children.Add(Text("起動前にJavaとMODの対応バージョンを確認してください。Java要件はサーバーのダウンロード後に表示します。"));
-        var tools = Card(page, "クイック操作");
-        var actions = new WrapPanel(); actions.Children.Add(AsyncBtn("停止中バックアップ", async ct => { Stopped(p); var path = await Task.Run(() => SafeFiles.Snapshot(store.ServerDir(p), store.BackupDir(p)), ct); MessageBox.Show(this, path, "バックアップ保存"); }));
-        actions.Children.Add(Btn("コンソールへ", () => Navigate("console"))); actions.Children.Add(Btn("MOD構成へ", () => Navigate("mods"))); tools.Children.Add(actions);
+        var next = Card(page, "次の操作");
+        next.Children.Add(Text("左側からコンソール、バックアップ、サーバー設定、MOD・プラグインの画面を選んでください。"));
     }
     private void Start(ServerProfile p)
     {
@@ -228,6 +236,18 @@ public sealed class MainWindow : Window
     }
     private void Tick()
     {
+        if (!busy && ++reconcileTicks >= 10)
+        {
+            reconcileTicks = 0;
+            try
+            {
+                if (store.ReconcileMissingServerFolders(p => runtimes.TryGetValue(p.Id, out var r) && (r.Running || r.Busy)) > 0)
+                {
+                    RefreshServers(); Navigate(currentPage); status.Text = "フォルダがないサーバーを一覧から除きました";
+                }
+            }
+            catch (Exception ex) { status.Text = "一覧の更新に失敗: " + ex.Message; }
+        }
         foreach (var (id, runtime) in runtimes)
         {
             var fresh = runtime.Drain();
@@ -277,38 +297,64 @@ public sealed class MainWindow : Window
             };
         }
         engine.SelectionChanged += (_, _) => UpdateEngineFields(); UpdateEngineFields();
-        card = Card(page, "Java・メモリ・接続");
+        card.Children.Add(Btn("設定を保存", () =>
+        {
+            Stopped(p);
+            var newName = name.Text.Trim(); if (string.IsNullOrWhiteSpace(newName)) throw new IOException("名前を入力してください。");
+            p.Name = newName; p.Engine = engine.SelectedItem?.ToString() ?? "custom";
+            p.Version = version.Text.Trim(); p.LoaderVersion = p.Engine == "fabric" ? loaderVersion.Text.Trim() : "";
+            store.Save(); RefreshServers(p); status.Text = "種類とバージョンを保存しました";
+        }, true));
+    }
+    private void ResourcesPage()
+    {
+        var p = Selected!;
+        var card = Card(page, "Java・メモリ・ポート");
         var java = Field(card, "Java実行ファイルの場所", p.JavaPath);
         card.Children.Add(Btn("java.exe を選択", () => { var file = Pick("Java|java.exe"); if (file != null) java.Text = file; }));
         var min = Field(card, "最小メモリ MB", p.MinMemoryMb.ToString()); var max = Field(card, "最大メモリ MB", p.MaxMemoryMb.ToString()); var port = Field(card, "サーバーポート", p.Port.ToString());
-        card = Card(page, "詳細な起動引数");
+        card.Children.Add(Btn("リソース設定を保存", () =>
+        {
+            Stopped(p);
+            var draft = new ServerProfile { Name = p.Name, MinMemoryMb = int.Parse(min.Text), MaxMemoryMb = int.Parse(max.Text), Port = int.Parse(port.Text), JavaPath = java.Text.Trim() };
+            draft.Validate(); p.MinMemoryMb = draft.MinMemoryMb; p.MaxMemoryMb = draft.MaxMemoryMb; p.Port = draft.Port; p.JavaPath = draft.JavaPath;
+            store.Save(); status.Text = "Java・メモリ・ポートを保存しました";
+        }, true));
+        card.Children.Add(Text("25565が使用中なら別のポートを指定してください。ゲーム・接続設定のserver-portも確認してください。", 12));
+    }
+    private void AdvancedPage()
+    {
+        var p = Selected!; var card = Card(page, "詳細な起動引数");
         var jar = Field(card, "サーバー本体ファイル（サーバーフォルダ内の場所）", p.Jar);
         var jvm = Field(card, "Javaへの追加オプション（1行に1つ・引用符不要）", string.Join(Environment.NewLine, p.JvmArgs), true);
         var args = Field(card, "サーバーへの起動オプション（1行に1つ・通常は空欄）", string.Join(Environment.NewLine, p.LaunchArgs), true);
         card.Children.Add(Text("Forge / NeoForge例: @libraries/net/neoforged/neoforge/…/win_args.txt と nogui を別々の行に指定。シェル / BATは実行しません。", 12));
-        card = Card(page, "利用規約・保存");
+        card.Children.Add(Btn("起動引数を保存", () =>
+        {
+            Stopped(p); var newJar = jar.Text.Trim(); _ = SafeFiles.Inside(store.ServerDir(p), newJar);
+            p.Jar = newJar; p.JvmArgs = Lines(jvm.Text); p.LaunchArgs = Lines(args.Text); store.Save(); status.Text = "起動引数を保存しました";
+        }, true));
+    }
+    private void InstallPage()
+    {
+        var p = Selected!; var card = Card(page, "サーバー本体の導入");
+        card.Children.Add(Text($"種類: {JapaneseDisplay.Label(p.Engine)}  Minecraft: {p.Version}  Java: {p.JavaPath}"));
         var eula = new CheckBox { Content = "Minecraftの利用規約を読み、このサーバーでの利用に同意する", IsChecked = p.EulaAccepted }; card.Children.Add(eula); card.Children.Add(Btn("Minecraftの利用規約を開く", () => Open("https://www.minecraft.net/eula")));
-        void Save()
+        card.Children.Add(AsyncBtn("サーバー本体を導入", async ct =>
         {
-            Stopped(p);
-            var draft = new ServerProfile { Name = name.Text.Trim(), MinMemoryMb = int.Parse(min.Text), MaxMemoryMb = int.Parse(max.Text), Port = int.Parse(port.Text), JavaPath = java.Text.Trim() }; draft.Validate();
-            _ = SafeFiles.Inside(store.ServerDir(p), jar.Text.Trim());
-            p.Name = draft.Name; p.MinMemoryMb = draft.MinMemoryMb; p.MaxMemoryMb = draft.MaxMemoryMb; p.Port = draft.Port; p.JavaPath = draft.JavaPath;
-            p.Engine = engine.SelectedItem?.ToString() ?? "custom"; p.Version = version.Text.Trim(); p.LoaderVersion = p.Engine == "fabric" ? loaderVersion.Text.Trim() : ""; p.Jar = jar.Text.Trim(); p.JvmArgs = Lines(jvm.Text); p.LaunchArgs = Lines(args.Text); p.EulaAccepted = eula.IsChecked == true; store.Save(); status.Text = "起動設定を保存しました";
-        }
-        var row = new WrapPanel(); row.Children.Add(Btn("設定を保存", () => { Save(); RefreshServers(p); }, true));
-        row.Children.Add(AsyncBtn("保存してサーバー本体を導入", async ct =>
-        {
-            Save();
+            Stopped(p); p.EulaAccepted = eula.IsChecked == true; store.Save();
             if (File.Exists(Path.Combine(store.ServerDir(p), "server.jar")))
             {
                 if (!Confirm("server.jarを更新します。先にサーバー全体のバックアップを作成します。続行しますか？")) return;
-                await Task.Run(() => SafeFiles.Snapshot(store.ServerDir(p), store.BackupDir(p)), ct);
+                await Task.Run(() => SafeFiles.Snapshot(store.ServerDir(p), store.BackupDir(p), cancellationToken: ct), ct);
             }
             var required = await downloads.InstallServer(p, store.ServerDir(p), Progress(), ct); store.Save();
             MessageBox.Show(this, $"導入完了。Minecraftのメタデータ上のJava要件: {required}\nPaper等は独自の要件も確認してください。Java画面で使用Javaを選択できます。", "サーバーを導入しました");
-        })); card.Children.Add(row);
-        var imports = Card(page, "既存サーバーをコピーして取り込む");
+        }, true));
+    }
+    private void ImportPage()
+    {
+        var p = Selected!; var imports = Card(page, "既存サーバーをコピーして取り込む");
         imports.Children.Add(Text("元フォルダは変更しません。稼働中のワールドはコピーしないでください。取り込み先は空の新規サーバーのみです。"));
         imports.Children.Add(AsyncBtn("停止済みフォルダを選んでコピー", async ct =>
         {
@@ -318,11 +364,10 @@ public sealed class MainWindow : Window
             if (SafeFiles.Files(target).Any()) throw new IOException("空の新規サーバーを使用してください。");
             if (!Confirm("元サーバーが停止していることを確認しましたか？稼働中の場合は「いいえ」を選んでください。")) return;
             var stage = target + ".import-" + Guid.NewGuid().ToString("N");
-            try { await Task.Run(() => SafeFiles.CopyTree(source, stage), ct); ct.ThrowIfCancellationRequested(); Directory.Delete(target); Directory.Move(stage, target); }
+            try { await Task.Run(() => SafeFiles.CopyTree(source, stage), ct); ct.ThrowIfCancellationRequested(); SafeFiles.PromoteIntoEmptyDirectory(stage, target); }
             finally { if (Directory.Exists(stage)) Directory.Delete(stage, true); }
             MessageBox.Show(this, "コピーしました。JARパスまたはカスタム起動引数とJavaを設定してください。");
         }));
-        OrganizeCards();
     }
     private static string[] Lines(string value) => value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     private string? Pick(string filter) { var dialog = new OpenFileDialog { Filter = filter }; return dialog.ShowDialog(this) == true ? dialog.FileName : null; }
@@ -358,20 +403,19 @@ public sealed class MainWindow : Window
     private void ModsPage()
     {
         var p = Selected!; var root = store.ServerDir(p);
-        var sync = Card(page, "AutoModpack • クライアントへMOD構成を同期");
-        var autoConfig = Path.Combine(root, "automodpack", "automodpack-server.json");
-        sync.Children.Add(Text(File.Exists(autoConfig) ? "AutoModpackのサーバー設定を検出しました。設定ファイル画面で編集できます。" : "対応するAutoModpackをサーバーとクライアントへ導入します。初回起動後に生成されるサーバー設定を編集できます。"));
-        sync.Children.Add(Text("同期対象ファイルと配布専用フォルダを設定して管理します。MOD・設定変更後はコンソールの「同期データを再生成」を実行してください。", 12));
-        sync.Children.Add(Text("構成プリセットにはAutoModpackのサーバー設定も保存します。配布ファイル・鍵は全体バックアップで保管してください。", 12));
-        var syncRow = new WrapPanel(); syncRow.Children.Add(Btn("同期の設定を開く", () => Navigate("modsettings"))); syncRow.Children.Add(Btn("コンソールへ", () => Navigate("console"))); syncRow.Children.Add(Btn("AutoModpack公式ガイド", () => Open("https://github.com/Skidamek/AutoModpack/blob/main/docs/quick-start.mdx"))); sync.Children.Add(syncRow);
         var local = Card(page, "MOD / プラグイン"); var folder = new ComboBox { ItemsSource = new[] { "mods", "plugins" }, SelectedItem = p.Engine is "paper" or "folia" ? "plugins" : "mods" }; JapaneseDisplay.Apply(folder); local.Children.Add(folder);
-        var list = new ListBox { Height = 150 }; local.Children.Add(list);
+        var list = new ListBox { Height = 440, Name = "InstalledJars" }; local.Children.Add(list);
         string Target() => Path.Combine(root, folder.SelectedItem.ToString()!);
         void Refresh() { Directory.CreateDirectory(Target()); list.ItemsSource = Directory.EnumerateFiles(Target()).Where(f => f.EndsWith(".jar", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".jar.disabled", StringComparison.OrdinalIgnoreCase)).Select(Path.GetFileName).Order().ToArray(); }
         folder.SelectionChanged += (_, _) => Refresh(); Refresh();
         var row = new WrapPanel(); row.Children.Add(Btn("JARを追加", () => { Stopped(p); var dialog = new OpenFileDialog { Filter = "MOD / Plugin|*.jar", Multiselect = true }; if (dialog.ShowDialog(this) != true) return; new ServerFiles(store, p, Runtime(p)).AddJars(folder.SelectedItem.ToString()!, dialog.FileNames); Refresh(); }));
         row.Children.Add(Btn("有効 / 無効", () => { Stopped(p); var name = list.SelectedItem?.ToString() ?? throw new IOException("ファイルを選択してください。"); new ServerFiles(store, p, Runtime(p)).ToggleJar(folder.SelectedItem.ToString()!, name); Refresh(); }));
         row.Children.Add(Btn("フォルダ", () => Open(Target()))); local.Children.Add(row);
+        local.Children.Add(Btn("一覧を更新", Refresh));
+    }
+    private void PresetsPage()
+    {
+        var p = Selected!;
         var preset = Card(page, "構成プリセット"); preset.Children.Add(Text("MOD・プラグイン本体と共通設定・ワールド別設定・スクリプトを保存。切替前に全体をバックアップします。"));
         var keepSettings = new CheckBox { Content = "現在の設定を維持（未配置の設定だけ追加）", IsChecked = true }; preset.Children.Add(keepSettings);
         preset.Children.Add(Text("チェックを外すと同名設定をプリセットの内容に戻します。プリセットにない設定・プラグインデータはどちらでも残ります。", 12));
@@ -385,17 +429,25 @@ public sealed class MainWindow : Window
             Stopped(p); Directory.CreateDirectory(store.PresetDir(p)); var chosen = Choose("プリセット", Directory.EnumerateFiles(store.PresetDir(p), "*.zip").Select(f => Path.GetFileName(f)!)); if (chosen == null) return;
             var preserve = keepSettings.IsChecked == true;
             if (!Confirm("MOD・プラグインJARを切り替えます。" + (preserve ? "現在の設定を維持します。" : "同名設定をプリセットの内容で上書きします。") + "全体バックアップを作って続行しますか？")) return;
-            var files = new ServerFiles(store, p, Runtime(p)); await Task.Run(() => files.ApplyPreset(chosen, preserve), ct); Refresh();
+            var files = new ServerFiles(store, p, Runtime(p)); await Task.Run(() => files.ApplyPreset(chosen, preserve), ct);
         })); preset.Children.Add(presetRow);
-        var search = Card(page, "Modrinthから検索・導入"); var query = Field(search, "MOD名（選択サーバーのMCバージョン・ローダーで検索）", ""); var hits = new ListBox { Height = 150 }; List<JsonNode> results = [];
+    }
+    private void ModSearchPage()
+    {
+        var p = Selected!; var root = store.ServerDir(p);
+        var search = Card(page, "Modrinthから検索・導入"); var query = Field(search, "MOD名（選択サーバーのMCバージョン・ローダーで検索）", ""); var hits = new ListBox { Height = 400 }; List<JsonNode> results = [];
         search.Children.Add(AsyncBtn("検索", async ct => { var nodes = await downloads.SearchMods(query.Text, p.Version, p.Engine, ct); results = nodes.Select(n => n!).ToList(); hits.ItemsSource = results.Select(n => n["title"]!.ToString() + "  —  " + n["description"]!.ToString()).ToArray(); })); search.Children.Add(hits);
         search.Children.Add(AsyncBtn("選択MODと必須依存を導入", async ct =>
         {
             Stopped(p); if (hits.SelectedIndex < 0) throw new IOException("検索結果を選択してください。");
             var releases = await downloads.ResolveMods(results[hits.SelectedIndex]["project_id"]!.ToString(), p.Version, p.Engine, ct);
             if (!Confirm("導入予定:\n" + string.Join("\n", releases.Select(n => n["name"]!.ToString())) + "\n\n既存MODとの互換性は作者の説明も確認してください。導入しますか？")) return;
-            await downloads.InstallMods(releases, Path.Combine(root, p.Engine is "paper" or "folia" ? "plugins" : "mods"), Progress(), ct); Refresh();
+            await downloads.InstallMods(releases, Path.Combine(root, p.Engine is "paper" or "folia" ? "plugins" : "mods"), Progress(), ct);
         }, true));
+    }
+    private void ModpacksPage()
+    {
+        var p = Selected!; var root = store.ServerDir(p);
         var packs = Card(page, "Modrinth MODパック (.mrpack)"); packs.Children.Add(Text("空の新規サーバーへサーバー必須ファイルを取り込みます。クライアント専用・任意ファイルは除外。ローダー本体は別途導入します。"));
         packs.Children.Add(AsyncBtn("mrpackを取り込む", async ct =>
         {
@@ -404,9 +456,18 @@ public sealed class MainWindow : Window
             var dependencies = JsonNode.Parse(deps)!; p.Version = dependencies["minecraft"]?.ToString() ?? p.Version;
             p.Engine = dependencies["fabric-loader"] != null ? "fabric" : dependencies["neoforge"] != null ? "neoforge" : dependencies["forge"] != null ? "forge" : dependencies["quilt-loader"] != null ? "quilt" : "custom"; store.Save();
             p.LoaderVersion = dependencies["fabric-loader"]?.ToString() ?? ""; store.Save();
-            MessageBox.Show(this, "取り込み完了。必要ローダーのバージョン:\n" + deps + "\n起動設定からローダー本体を導入してください。Fabricはパック指定版を保存しました。", "MODパック"); Refresh();
+            MessageBox.Show(this, "取り込み完了。必要ローダーのバージョン:\n" + deps + "\n起動設定からローダー本体を導入してください。Fabricはパック指定版を保存しました。", "MODパック");
         }));
-        OrganizeCards("MOD / プラグイン");
+    }
+    private void AutoModpackPage()
+    {
+        var root = store.ServerDir(Selected!);
+        var sync = Card(page, "AutoModpack • クライアントへMOD構成を同期");
+        var autoConfig = Path.Combine(root, "automodpack", "automodpack-server.json");
+        sync.Children.Add(Text(File.Exists(autoConfig) ? "AutoModpackのサーバー設定を検出しました。設定ファイル画面で編集できます。" : "対応するAutoModpackをサーバーとクライアントへ導入します。初回起動後に生成されるサーバー設定を編集できます。"));
+        sync.Children.Add(Text("同期対象ファイルと配布専用フォルダを設定して管理します。MOD・設定変更後はコンソールの「同期データを再生成」を実行してください。", 12));
+        sync.Children.Add(Text("構成プリセットにはAutoModpackのサーバー設定も保存します。配布ファイル・鍵は全体バックアップで保管してください。", 12));
+        var syncRow = new WrapPanel(); syncRow.Children.Add(Btn("同期の設定を開く", () => Navigate("modsettings"))); syncRow.Children.Add(Btn("コンソールへ", () => Navigate("console"))); syncRow.Children.Add(Btn("AutoModpack公式ガイド", () => Open("https://github.com/Skidamek/AutoModpack/blob/main/docs/quick-start.mdx"))); sync.Children.Add(syncRow);
     }
     private void PropertiesPage()
     {
@@ -563,20 +624,48 @@ public sealed class MainWindow : Window
     }
     private void BackupsPage()
     {
-        var p = Selected!; var card = Card(page, "ワールドを、戻せる安心と一緒に"); card.Children.Add(Text("サーバー全体をZIPで保存します。整合性のため停止中のみ実行できます。復元前のフォルダは .previous-* として残ります。"));
-        Directory.CreateDirectory(store.BackupDir(p)); var list = new ListBox { Height = 240 }; void Refresh() => list.ItemsSource = Directory.EnumerateFiles(store.BackupDir(p), "*.zip").OrderDescending().Select(f => Path.GetFileName(f)!).ToArray(); Refresh(); card.Children.Add(list);
-        var row = new WrapPanel(); row.Children.Add(AsyncBtn("バックアップを作成", async ct => { Stopped(p); await Task.Run(() => SafeFiles.Snapshot(store.ServerDir(p), store.BackupDir(p)), ct); Refresh(); }, true));
+        var p = Selected!; var card = Card(page, "バックアップ"); card.Children.Add(Text("サーバー全体をZIPで保存します。整合性のため停止中のみ実行できます。復元前のフォルダは .previous-* として残ります。"));
+        var mode = new ComboBox { ItemsSource = new[] { "高速（圧縮なし・容量大）", "圧縮（容量を節約）" }, SelectedIndex = 0 };
+        card.Children.Add(Text("保存方式", 12)); card.Children.Add(mode);
+        var progressBar = new ProgressBar { Name = "BackupProgress", Minimum = 0, Maximum = 100, Height = 16, Margin = new Thickness(0, 12, 0, 5) };
+        var progressText = Text("バックアップ待機中", 12); card.Children.Add(progressBar); card.Children.Add(progressText);
+        Directory.CreateDirectory(store.BackupDir(p)); var list = new ListBox { Height = 330 }; void Refresh() => list.ItemsSource = Directory.EnumerateFiles(store.BackupDir(p), "*.zip").OrderDescending().Select(f => Path.GetFileName(f)!).ToArray(); Refresh(); card.Children.Add(list);
+        var row = new WrapPanel(); row.Children.Add(AsyncBtn("バックアップを作成", async ct =>
+        {
+            Stopped(p);
+            progressBar.IsIndeterminate = true; progressText.Text = "ファイルを確認中…";
+            var watch = Stopwatch.StartNew();
+            var compression = mode.SelectedIndex == 0 ? CompressionLevel.NoCompression : CompressionLevel.Fastest;
+            var showingProgress = true;
+            var reporter = new Progress<SnapshotProgress>(s =>
+            {
+                if (!showingProgress) return;
+                progressBar.IsIndeterminate = false;
+                progressBar.Value = s.BytesTotal == 0 ? (s.FilesTotal == 0 ? 100 : s.FilesDone * 100d / s.FilesTotal) : s.BytesDone * 100d / s.BytesTotal;
+                var speed = s.BytesDone / Math.Max(watch.Elapsed.TotalSeconds, 0.1) / 1048576d;
+                progressText.Text = $"{progressBar.Value:F0}%  •  {s.FilesDone}/{s.FilesTotal} ファイル  •  {s.BytesDone / 1048576d:F1}/{s.BytesTotal / 1048576d:F1} MB  •  {speed:F0} MB/s";
+            });
+            try
+            {
+                await Task.Run(() => SafeFiles.Snapshot(store.ServerDir(p), store.BackupDir(p), reporter, ct, compression), ct);
+                showingProgress = false; progressBar.Value = 100; progressText.Text = $"完了  •  {watch.Elapsed.TotalSeconds:F1} 秒"; Refresh();
+            }
+            catch (OperationCanceledException) { showingProgress = false; progressBar.IsIndeterminate = false; progressText.Text = "キャンセルしました。未完成のZIPは削除しました。"; throw; }
+        }, true));
         row.Children.Add(AsyncBtn("選択したバックアップを復元", async ct =>
         {
             Stopped(p); var file = list.SelectedItem?.ToString() ?? throw new IOException("バックアップを選択してください。"); if (!Confirm("選択したバックアップにサーバー全体を戻します。続行しますか？")) return;
             var old = await Task.Run(() => SafeFiles.Restore(SafeFiles.Inside(store.BackupDir(p), file), store.ServerDir(p)), ct); MessageBox.Show(this, "復元完了。直前のデータ:\n" + old + "\n起動プロファイルは変更されないため、Java・バージョン設定も確認してください。");
-        })); row.Children.Add(Btn("保存先を開く", () => Open(store.BackupDir(p)))); card.Children.Add(row);
+        })); row.Children.Add(Btn("保存先を開く", () => Open(store.BackupDir(p)), allowWhileBusy: true)); card.Children.Add(row);
     }
     private void SystemPage()
     {
         var card = Card(page, "このPCの状態"); var info = new TextBox { Text = Diagnostics.Describe(), IsReadOnly = true, AcceptsReturn = true, Height = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }; card.Children.Add(info); card.Children.Add(Btn("更新", () => info.Text = Diagnostics.Describe()));
+    }
+    private void NetworkPage()
+    {
         var network = Card(page, "サーバーへの接続診断"); var host = Field(network, "ホスト名 / IP", "127.0.0.1"); var port = Field(network, "ポート", (Selected?.Port ?? 25565).ToString()); var result = Text(""); network.Children.Add(AsyncBtn("接続をテスト", async _ => { var number = int.Parse(port.Text); if (number is < 1 or > 65535) throw new IOException("ポートが不正です。"); result.Text = await Diagnostics.Probe(host.Text.Trim(), number); })); network.Children.Add(result);
-        network.Children.Add(Btn("Windowsのファイアウォール設定", () => Open("windowsdefender://network/"))); OrganizeCards();
+        network.Children.Add(Btn("Windowsのファイアウォール設定", () => Open("windowsdefender://network/")));
     }
     private void AppearancePage()
     {
