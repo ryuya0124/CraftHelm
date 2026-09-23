@@ -1,4 +1,4 @@
-param([string]$Version = '0.1.14')
+param([string]$Version = '0.1.15')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $setup = Join-Path $projectRoot "artifacts\packages\CraftHelm-$Version-win-x64-setup.exe"
@@ -44,6 +44,7 @@ for ($pass = 0; $pass -lt 2; $pass++) {
     if ((InvokeInstaller $setup ($installOptions + ('/LOG="{0}"' -f (Join-Path $testDirectory "install-$pass.log")))) -ne 0) { throw 'Install/upgrade failed' }
     $installed = Get-ItemProperty -LiteralPath $key
     if (-not (Test-Path -LiteralPath (Join-Path $testDirectory 'coreclr.dll'))) { throw 'Installer must deploy runtime without launch-time extraction' }
+    if (-not (Test-Path -LiteralPath (Join-Path $testDirectory 'ICSharpCode.AvalonEdit.dll')) -or -not (Test-Path -LiteralPath (Join-Path $testDirectory 'licenses\AvalonEdit-LICENSE.txt'))) { throw 'Syntax editor or license missing from installation' }
     if ($installed.DisplayName -ne 'CraftHelm') { throw 'Application display name was not renamed' }
     if (Test-Path -LiteralPath $oldShortcut) { throw 'Old application shortcut was not replaced' }
     if ($installed.DisplayVersion -ne $Version) { throw 'Uninstall registration version mismatch' }

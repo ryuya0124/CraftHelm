@@ -10,6 +10,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using CraftHarbor.Core;
+using ICSharpCode.AvalonEdit;
 using Microsoft.Win32;
 using MessageBox = CraftHarbor.Desktop.HarborDialog;
 
@@ -711,21 +712,93 @@ public sealed class MainWindow : Window
     }
     private void FilesPage()
     {
-        var p = Selected!; var root = store.ServerDir(p); ContentPanel.Children.Add(Btn("ゲーム・接続の設定を開く", () => Navigate("properties"))); var card = Card(ContentPanel, "設定ファイルを編集"); card.Children.Add(Text("停止中に保存できます。保存前のファイルは履歴に退避します。server-portは起動設定のポートが優先されます。"));
+        var p = Selected!; var root = store.ServerDir(p); ContentPanel.Children.Add(Btn("ゲーム・接続の設定を開く", () => Navigate("properties"))); var card = Card(ContentPanel, "設定ファイルを探して編集"); card.Children.Add(Text("左の一覧からファイルを選び、右で編集します。停止中に保存でき、保存前のファイルは履歴に退避します。server-portは起動設定のポートが優先されます。"));
         if (p.Engine == "paper") card.Children.Add(Text("Paperの既存ワールドの難易度は、コンソールで difficulty hard などを送信して変更してください。設定ファイルだけでは既存ワールドへ反映されない場合があります。", 12));
         card.Children.Add(Text("FTBのSNBT、JSON5/JSONC、CFG、KubeJSのJS、CraftTweakerのZSにも対応。JSON以外の構文・値は各MOD側で検証されます。最大500件・1ファイル1MB未満。", 12));
-        var paths = ModConfigurations.EditableFiles(root).ToList(); if (!paths.Contains("server.properties")) paths.Insert(0, "server.properties");
-        var list = new ComboBox { ItemsSource = paths, SelectedIndex = 0 }; JapaneseDisplay.Apply(list); card.Children.Add(list);
-        var editor = new TextBox { AcceptsReturn = true, AcceptsTab = true, Height = 340, FontFamily = new FontFamily("Consolas"), FontSize = 13, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
-        string current = ""; bool dirty = false; bool loading = false;
-        void Load() { loading = true; current = list.SelectedItem?.ToString() ?? "server.properties"; var path = SafeFiles.Inside(root, current); editor.Text = File.Exists(path) ? File.ReadAllText(path) : "online-mode=true\nserver-port=" + p.Port; dirty = false; loading = false; }
-        list.SelectionChanged += (_, _) => { if (loading) return; if (dirty && !Confirm("未保存の編集を破棄して切り替えますか？")) { loading = true; list.SelectedItem = current; loading = false; return; } Load(); };
-        editor.TextChanged += (_, _) => { if (!loading) dirty = true; }; Load(); card.Children.Add(editor);
-        mayLeave = () => !dirty || Confirm("設定ファイルの未保存の編集を破棄して移動しますか？");
-        card.Children.Add(Btn("ファイルを保存", () =>
+        List<ConfigurationFileEntry> entries = ReadEntries();
+        List<ConfigurationFileEntry> ReadEntries()
         {
-            new ServerFiles(store, p, Runtime(p)).SaveConfiguration(current, editor.Text); dirty = false; status.Text = "保存しました";
+            var paths = ModConfigurations.EditableFiles(root).ToList();
+            if (!paths.Contains("server.properties", StringComparer.OrdinalIgnoreCase)) paths.Insert(0, "server.properties");
+            return paths.Select(path => ConfigurationFileEntry.FromPath(root, path)).ToList();
+        }
+        var search = new TextBox { Name = "ConfigSearch" };
+        System.Windows.Automation.AutomationProperties.SetName(search, "設定ファイルを名前やパスで検索");
+        card.Children.Add(new TextBlock { Text = "ファイル名・フォルダ名で検索", Foreground = Brush("Label") }); card.Children.Add(search);
+        var categories = new WrapPanel { Name = "ConfigCategories" }; card.Children.Add(categories);
+        var count = Text("", 12); card.Children.Add(count);
+        var columns = new Grid(); columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(215) }); columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) }); columns.ColumnDefinitions.Add(new ColumnDefinition());
+        columns.SizeChanged += (_, _) => columns.ColumnDefinitions[0].Width = new GridLength(columns.ActualWidth < 600 ? 160 : 215);
+        var list = new ListBox { Name = "ConfigFiles", Height = 470, Style = (Style)FindResource("ServerListStyle"), ItemTemplate = (DataTemplate)FindResource("ConfigurationFileItem") };
+        columns.Children.Add(list);
+        var right = new StackPanel(); Grid.SetColumn(right, 2); columns.Children.Add(right);
+        var selectedPath = new TextBlock { Name = "ConfigSelectedPath", FontWeight = FontWeights.SemiBold, Foreground = Brush("Accent"), Margin = new Thickness(0, 0, 0, 8) }; right.Children.Add(selectedPath);
+        var actions = new WrapPanel(); right.Children.Add(actions);
+        var editor = new TextEditor
+        {
+            Name = "ConfigEditor", Height = 395, FontFamily = new FontFamily("Consolas"), FontSize = 13,
+            ShowLineNumbers = true, Background = Brush("Input"), Foreground = Brush("Ink"), LineNumbersForeground = Brush("Muted"),
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
+        };
+        right.Children.Add(new Border { Background = Brush("Input"), BorderBrush = Brush("Border"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Child = editor }); card.Children.Add(columns);
+        string current = "server.properties"; string category = "すべて"; bool dirty = false; bool loading = false; bool changingSelection = false;
+        void Load(string path)
+        {
+            loading = true; current = path;
+            var file = SafeFiles.Inside(root, current);
+            editor.SyntaxHighlighting = ConfigurationSyntax.ForPath(current);
+            editor.Text = File.Exists(file) ? File.ReadAllText(file) : current == "server.properties" ? "online-mode=true\nserver-port=" + p.Port : "";
+            dirty = false; selectedPath.Text = current.Replace('\\', '/'); loading = false;
+        }
+        void RenderList()
+        {
+            var filtered = entries.Where(e => (category is "すべて" or "最近" || e.Category == category)
+                && e.RelativePath.Contains(search.Text.Trim(), StringComparison.OrdinalIgnoreCase));
+            var visible = category == "最近" ? filtered.OrderByDescending(e => e.LastModifiedUtc).Take(25).ToArray()
+                : filtered.OrderBy(e => e.RelativePath.Equals("server.properties", StringComparison.OrdinalIgnoreCase) ? 0 : 1).ThenBy(e => e.RelativePath, StringComparer.OrdinalIgnoreCase).ToArray();
+            changingSelection = true; list.ItemsSource = visible;
+            list.SelectedItem = visible.FirstOrDefault(e => e.RelativePath.Equals(current, StringComparison.OrdinalIgnoreCase));
+            changingSelection = false;
+            count.Text = $"{visible.Length} 件表示  •  全 {entries.Count} 件";
+            foreach (var button in categories.Children.OfType<Button>())
+            {
+                var active = button.Tag?.ToString() == category;
+                button.Background = Brush(active ? "Accent" : "Button"); button.Foreground = Brush(active ? "AccentInk" : "Ink");
+            }
+        }
+        void RefreshCategories()
+        {
+            categories.Children.Clear();
+            foreach (var label in new[] { "すべて", "最近", "基本", "MOD設定", "プラグイン", "ワールド", "スクリプト", "AutoModpack", "その他" })
+            {
+                if (label is not ("すべて" or "最近") && !entries.Any(e => e.Category == label)) continue;
+                var filter = Btn(label, () => { category = label; RenderList(); }); filter.Tag = label; categories.Children.Add(filter);
+            }
+            if (!categories.Children.OfType<Button>().Any(b => b.Tag?.ToString() == category)) category = "すべて";
+        }
+        search.TextChanged += (_, _) => RenderList();
+        list.SelectionChanged += (_, _) =>
+        {
+            if (changingSelection || list.SelectedItem is not ConfigurationFileEntry entry || entry.RelativePath == current) return;
+            if (dirty && !Confirm("未保存の編集を破棄して別のファイルを開きますか？"))
+            {
+                changingSelection = true; list.SelectedItem = list.Items.OfType<ConfigurationFileEntry>().FirstOrDefault(e => e.RelativePath == current); changingSelection = false; return;
+            }
+            Load(entry.RelativePath);
+        };
+        editor.TextChanged += (_, _) => { if (!loading) { dirty = true; selectedPath.Text = current.Replace('\\', '/') + "  •  未保存"; } };
+        RefreshCategories(); Load(current); RenderList();
+        mayLeave = () => !dirty || Confirm("設定ファイルの未保存の編集を破棄して移動しますか？");
+        actions.Children.Add(Btn("ファイルを保存", () =>
+        {
+            new ServerFiles(store, p, Runtime(p)).SaveConfiguration(current, editor.Text); dirty = false; selectedPath.Text = current.Replace('\\', '/'); status.Text = "保存しました";
+            entries = ReadEntries(); RefreshCategories(); RenderList();
         }, true));
+        actions.Children.Add(Btn("一覧を更新", () =>
+        {
+            if (dirty && !Confirm("未保存の編集を破棄して一覧を更新しますか？")) return;
+            entries = ReadEntries(); RefreshCategories(); Load(entries.Any(e => e.RelativePath == current) ? current : "server.properties"); RenderList();
+        }));
     }
     private void BackupsPage()
     {

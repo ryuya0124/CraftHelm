@@ -6,6 +6,9 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using CraftHarbor.Core;
 using CraftHarbor.Desktop;
+using ICSharpCode.AvalonEdit;
+using ICSharpCode.AvalonEdit.Document;
+using ICSharpCode.AvalonEdit.Highlighting;
 
 internal static class Program
 {
@@ -74,6 +77,19 @@ internal static class Program
                 Theme.Apply(appearance, true);
                 Theme.Load(root);
                 if (Theme.Appearance != appearance) throw new Exception("Theme preference did not persist");
+                AssertColor("demo.json", "{\"name\":\"world\",\"enabled\":true,\"maxPlayers\":12}", "\"name\"", "Key");
+                AssertColor("demo.json", "{\"name\":\"world\",\"enabled\":true,\"maxPlayers\":12}", "world", "String");
+                AssertColor("demo.json", "{\"name\":\"world\",\"enabled\":true,\"maxPlayers\":12}", "true", "Keyword");
+                AssertColor("demo.json", "{\"name\":\"world\",\"enabled\":true,\"maxPlayers\":12}", "12", "Number");
+                AssertColor("demo.json5", "{\"url\":\"https://example.com\"}", "example", "String");
+                AssertColor("demo.jsonc", "// note", "note", "Comment");
+                AssertColor("demo.toml", "rate = 12.5 # note", "rate", "Key");
+                AssertColor("demo.toml", "rate = 12.5 # note", "12.5", "Number");
+                AssertColor("demo.toml", "rate = 12.5 # note", "note", "Comment");
+                AssertColor("demo.toml", "[display]", "display", "Section");
+                AssertColor("demo.toml", "name = \"a#b\"", "a#b", "String");
+                var keyColor = ConfigurationSyntax.ForPath("demo.json")!.GetNamedColor("Key")?.Foreground?.GetColor(null);
+                if (keyColor != (Color)ColorConverter.ConvertFromString(appearance == "Dark" ? "#83C9FF" : "#075A9B")) throw new Exception("Syntax colors do not follow " + appearance + " theme");
                 var themedServerList = Descendants(content).OfType<ListBox>().Single(x => x.Name == "ServerList");
                 themedServerList.ApplyTemplate();
                 if (themedServerList.Template.FindName("ServerListSurface", themedServerList) is not Border listSurface || ((SolidColorBrush)listSurface.Background).Color != ((SolidColorBrush)app.Resources["Input"]).Color)
@@ -88,7 +104,7 @@ internal static class Program
                         if (box.Template.FindName("PART_Popup", box) is not System.Windows.Controls.Primitives.Popup popup || popup.Child is not Border popupBorder || ((SolidColorBrush)popupBorder.Background).Color != expected) throw new Exception("Dropdown has incorrect theme");
                     }
                     if (((SolidColorBrush)((Grid)content).Background).Color != ((SolidColorBrush)app.Resources["Background"]).Color) throw new Exception("Local background did not update");
-                    if (args.Length > 0 && key is "launch" or "appearance" or "server-settings" or "mods" or "system" or "updates") SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, $"{appearance.ToLowerInvariant()}-{key}.png"));
+                    if (args.Length > 0 && key is "launch" or "appearance" or "server-settings" or "mods" or "system" or "updates" or "files") SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, $"{appearance.ToLowerInvariant()}-{key}.png"));
                 }
                 var contextMenu = Descendants(content).OfType<ListBox>().First().ContextMenu!;
                 contextMenu.ApplyTemplate(); contextMenu.Measure(new Size(260, 120)); contextMenu.Arrange(new Rect(0, 0, contextMenu.DesiredSize.Width, contextMenu.DesiredSize.Height)); contextMenu.UpdateLayout();
@@ -110,19 +126,44 @@ internal static class Program
             File.WriteAllText(Path.Combine(autoDir, "automodpack-server.json"), "{\"modpackName\":\"before\"}");
             File.WriteAllText(Path.Combine(autoDir, "automodpack-client.json"), "{\"testPrivateData\":true}");
             navigate.Invoke(window, ["files"]); Layout();
-            var configs = Descendants(content).OfType<ComboBox>().Single();
-            if (!configs.Items.Cast<string>().Contains(Path.Combine("automodpack", "automodpack-server.json")) || configs.Items.Cast<string>().Any(x => x.EndsWith("automodpack-client.json"))) throw new Exception("AutoModpack configuration scope incorrect");
-            configs.SelectedItem = Path.Combine("automodpack", "automodpack-server.json");
-            Descendants(content).OfType<TextBox>().Single().Text = "{\"modpackName\":\"日本語同期テスト\"}";
+            ListBox ConfigList() => Descendants(content).OfType<ListBox>().Single(x => x.Name == "ConfigFiles");
+            TextEditor ConfigEditor() => Descendants(content).OfType<TextEditor>().Single(x => x.Name == "ConfigEditor");
+            var configs = ConfigList();
+            if (!configs.Items.Cast<ConfigurationFileEntry>().Any(e => e.RelativePath == Path.Combine("automodpack", "automodpack-server.json")) || configs.Items.Cast<ConfigurationFileEntry>().Any(e => e.RelativePath.EndsWith("automodpack-client.json"))) throw new Exception("AutoModpack configuration scope incorrect");
+            var searchFiles = Descendants(content).OfType<TextBox>().Single(x => x.Name == "ConfigSearch");
+            searchFiles.Text = "automodpack"; Layout();
+            if (configs.Items.Count != 1) throw new Exception("Configuration search did not narrow the list");
+            searchFiles.Clear(); Layout();
+            configs.SelectedItem = configs.Items.Cast<ConfigurationFileEntry>().Single(e => e.RelativePath == Path.Combine("automodpack", "automodpack-server.json"));
+            if (ConfigEditor().SyntaxHighlighting?.Name != "JSON" || !ConfigEditor().ShowLineNumbers) throw new Exception("JSON highlighting or line numbers were not activated");
+            if (args.Length > 0) { Layout(); SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, "dark-json.png")); }
+            const string updatedAuto = "{\"modpackName\":\"日本語同期テスト\"}\n";
+            ConfigEditor().Text = updatedAuto;
+            searchFiles.Text = "server.properties"; Layout();
+            if (!ConfigEditor().Text.Contains("日本語同期テスト")) throw new Exception("Filtering discarded unsaved editor text");
+            searchFiles.Clear(); Layout();
             Descendants(content).OfType<Button>().Single(b => b.Content?.ToString() == "ファイルを保存").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            if (!File.ReadAllText(Path.Combine(autoDir, "automodpack-server.json")).Contains("日本語同期テスト") || !SafeFiles.Files(Path.Combine(root, "file-history")).Any()) throw new Exception("AutoModpack save/history failed");
+            if (File.ReadAllText(Path.Combine(autoDir, "automodpack-server.json")) != updatedAuto || !SafeFiles.Files(Path.Combine(root, "file-history")).Any()) throw new Exception("AutoModpack save/history or newline fidelity failed");
             var extraConfigs = new[] { "config/ftb.snbt", "config/mod.json5", "defaultconfigs/create.toml", "Adventure/serverconfig/mod.toml", "kubejs/server_scripts/test.js", "scripts/test.zs" };
-            foreach (var relative in extraConfigs) { var file = Path.Combine(serverDir, relative); Directory.CreateDirectory(Path.GetDirectoryName(file)!); File.WriteAllText(file, "original"); }
-            navigate.Invoke(window, ["files"]); Layout(); configs = Descendants(content).OfType<ComboBox>().Single();
+            foreach (var relative in extraConfigs) { var file = Path.Combine(serverDir, relative); Directory.CreateDirectory(Path.GetDirectoryName(file)!); File.WriteAllText(file, relative.EndsWith(".toml") ? "[display]\nname = \"CraftHelm\"\nenabled = true\nrate = 12.5 # test\n" : "original"); }
+            navigate.Invoke(window, ["files"]); Layout(); configs = ConfigList();
+            var groups = configs.Items.Cast<ConfigurationFileEntry>().ToDictionary(e => e.RelativePath, e => e.Category);
+            if (groups[Path.Combine("Adventure", "serverconfig", "mod.toml")] != "ワールド" || groups[Path.Combine("scripts", "test.zs")] != "スクリプト" || groups[Path.Combine("automodpack", "automodpack-server.json")] != "AutoModpack") throw new Exception("Configuration folders were grouped incorrectly");
+            var category = Descendants(content).OfType<Button>().Single(b => b.Tag?.ToString() == "MOD設定");
+            category.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
+            if (configs.Items.Cast<ConfigurationFileEntry>().Any(e => e.Category != "MOD設定") || configs.Items.Count < 2) throw new Exception("Configuration category filter failed");
+            Descendants(content).OfType<Button>().Single(b => b.Tag?.ToString() == "すべて").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
+            if (args.Length > 0) SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, "dark-files.png"));
+            content.Measure(new Size(980, 700)); content.Arrange(new Rect(0, 0, 980, 700)); content.UpdateLayout();
+            if (ConfigEditor().ActualWidth < 200 || configs.ActualWidth < 150) throw new Exception("Configuration browser does not fit minimum window width");
+            Layout();
             foreach (var relative in extraConfigs)
             {
-                var item = relative.Replace('/', Path.DirectorySeparatorChar); if (!configs.Items.Contains(item)) throw new Exception("Missing config " + relative);
-                configs.SelectedItem = item; Descendants(content).OfType<TextBox>().Single().Text = "edited 日本語";
+                var item = relative.Replace('/', Path.DirectorySeparatorChar); if (!configs.Items.Cast<ConfigurationFileEntry>().Any(e => e.RelativePath == item)) throw new Exception("Missing config " + relative);
+                configs.SelectedItem = configs.Items.Cast<ConfigurationFileEntry>().Single(e => e.RelativePath == item);
+                if (args.Length > 0 && relative.EndsWith(".toml")) { Layout(); SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, "dark-toml.png")); }
+                ConfigEditor().Text = "edited 日本語";
+                if (ConfigEditor().SyntaxHighlighting?.Name != (relative.EndsWith(".toml") ? "TOML" : relative.EndsWith(".js") || relative.EndsWith(".zs") ? "スクリプト" : relative.EndsWith(".json5") ? "JSON" : "設定")) throw new Exception("Wrong syntax colors for " + relative);
                 Descendants(content).OfType<Button>().Single(b => b.Content?.ToString() == "ファイルを保存").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 if (File.ReadAllText(Path.Combine(serverDir, relative)) != "edited 日本語") throw new Exception("Save failed " + relative);
             }
@@ -278,5 +319,17 @@ internal static class Program
             var child = VisualTreeHelper.GetChild(parent, i); yield return child;
             foreach (var descendant in Descendants(child)) yield return descendant;
         }
+    }
+    private static void AssertColor(string path, string sample, string token, string role)
+    {
+        var syntax = ConfigurationSyntax.ForPath(path) ?? throw new Exception("Missing syntax for " + path);
+        var document = new TextDocument(sample);
+        using var highlighter = new DocumentHighlighter(document, syntax);
+        var offset = sample.IndexOf(token, StringComparison.Ordinal);
+        if (offset < 0) throw new Exception("Missing sample token " + token);
+        var line = document.GetLineByOffset(offset).LineNumber;
+        var sections = highlighter.HighlightLine(line).Sections;
+        if (!sections.Any(s => s.Offset <= offset && offset < s.Offset + s.Length && s.Color.Name == role))
+            throw new Exception($"Wrong {path} color for {token}: expected {role}; got " + string.Join(", ", sections.Select(s => $"{s.Offset}:{s.Length}:{s.Color.Name}")));
     }
 }
