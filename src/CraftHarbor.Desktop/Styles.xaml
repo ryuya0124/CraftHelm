@@ -65,14 +65,14 @@
     <ToggleButton x:Name="Expand" Grid.Column="0" IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" Focusable="False" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource Muted}" Cursor="Hand">
      <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><TextBlock x:Name="Arrow" Text="▸" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="Center" VerticalAlignment="Center"/><ControlTemplate.Triggers><Trigger Property="IsChecked" Value="True"><Setter TargetName="Arrow" Property="Text" Value="▾"/></Trigger></ControlTemplate.Triggers></ControlTemplate></ToggleButton.Template>
     </ToggleButton>
-    <Border x:Name="ItemSurface" Grid.Column="1" Background="Transparent" CornerRadius="5" Padding="6,5"><ContentPresenter ContentSource="Header" VerticalAlignment="Center"/></Border>
+    <Border x:Name="ItemSurface" Grid.Column="1" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="5" Padding="6,5"><ContentPresenter ContentSource="Header" VerticalAlignment="Center"/></Border>
     <ItemsPresenter x:Name="Children" Grid.Row="1" Grid.Column="1"/>
    </Grid>
    <ControlTemplate.Triggers>
     <Trigger Property="HasItems" Value="False"><Setter TargetName="Expand" Property="Visibility" Value="Hidden"/></Trigger>
     <Trigger Property="IsExpanded" Value="False"><Setter TargetName="Children" Property="Visibility" Value="Collapsed"/></Trigger>
     <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemSurface" Property="Background" Value="{DynamicResource Selected}"/></Trigger>
-    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ItemSurface" Property="BorderBrush" Value="{DynamicResource Accent}"/><Setter TargetName="ItemSurface" Property="BorderThickness" Value="1"/></Trigger>
+    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ItemSurface" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger>
    </ControlTemplate.Triggers>
   </ControlTemplate></Setter.Value></Setter>
  </Style>

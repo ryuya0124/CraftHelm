@@ -56,6 +56,7 @@ public sealed class MainWindow : Window
     private string currentPage = "overview";
     private Func<bool>? mayLeave;
     private bool restoringSelection;
+    private double configurationEditorFontSize = 15;
     private int reconcileTicks;
     private ServerProfile? Selected => servers.SelectedItem as ServerProfile;
     private ServerRuntime Runtime(ServerProfile p)
@@ -605,9 +606,11 @@ public sealed class MainWindow : Window
                 else if (field.Options != null)
                 {
                     var labels = new Dictionary<string, string> { ["peaceful"] = "ピースフル", ["easy"] = "イージー", ["normal"] = "ノーマル", ["hard"] = "ハード", ["survival"] = "サバイバル", ["creative"] = "クリエイティブ", ["adventure"] = "アドベンチャー", ["spectator"] = "スペクテイター" };
-                    var choices = field.Options.Concat([value]).Distinct().Select(x => new KeyValuePair<string, string>(x, labels.GetValueOrDefault(x, JapaneseDisplay.Label(x)))).ToArray();
-                    var control = new ComboBox { ItemsSource = choices, DisplayMemberPath = "Value", SelectedValuePath = "Key", SelectedValue = value, Tag = field.Key }; row.Children.Add(control);
-                    readers[field.Key] = () => control.SelectedValue?.ToString() ?? value;
+                    var shown = PropertyFields.VisibleChoice(field.Key, value);
+                    var options = field.Key is "difficulty" or "gamemode" ? field.Options.Where(x => !int.TryParse(x, out _)) : field.Options.AsEnumerable();
+                    var choices = options.Concat([shown]).Distinct().Select(x => new KeyValuePair<string, string>(x, labels.GetValueOrDefault(x, JapaneseDisplay.Label(x)))).ToArray();
+                    var control = new ComboBox { ItemsSource = choices, DisplayMemberPath = "Value", SelectedValuePath = "Key", SelectedValue = shown, Tag = field.Key }; row.Children.Add(control);
+                    readers[field.Key] = () => control.SelectedValue?.ToString() is { } selected && selected != shown ? selected : value;
                 }
                 else if (field.Kind == "password")
                 {
@@ -758,12 +761,21 @@ public sealed class MainWindow : Window
         var actions = new WrapPanel(); Grid.SetRow(actions, 1); right.Children.Add(actions);
         var editor = new TextEditor
         {
-            Name = "ConfigEditor", FontFamily = new FontFamily("Consolas"), FontSize = 13,
+            Name = "ConfigEditor", FontFamily = new FontFamily("Cascadia Mono, Consolas"), FontSize = configurationEditorFontSize,
             ShowLineNumbers = true, Background = Brush("Input"), Foreground = Brush("Ink"), LineNumbersForeground = Brush("Muted"),
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
         };
+        editor.TextArea.TextView.ElementGenerators.Add(new EditorLineSpacing(editor));
         var editorBorder = new Border { Background = Brush("Input"), BorderBrush = Brush("Border"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Child = editor };
         Grid.SetRow(editorBorder, 2); right.Children.Add(editorBorder);
+        var zoomHint = new TextBlock { Name = "ConfigZoom", Foreground = Brush("Muted"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 8) };
+        void RefreshZoomHint() => zoomHint.Text = $"文字 {configurationEditorFontSize:0} pt  •  Ctrl＋ホイールで拡大・縮小";
+        RefreshZoomHint();
+        editor.PreviewMouseWheel += (_, e) =>
+        {
+            if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
+            ZoomEditor(editor, e.Delta); RefreshZoomHint(); e.Handled = true;
+        };
         string current = "server.properties"; string category = "すべて"; bool dirty = false; bool loading = false; bool changingSelection = false;
         void Load(string path)
         {
@@ -859,6 +871,13 @@ public sealed class MainWindow : Window
             if (dirty && !Confirm("未保存の編集を破棄して一覧を更新しますか？")) return;
             entries = ReadEntries(); RefreshCategories(); Load(entries.Any(e => e.RelativePath == current) ? current : "server.properties"); RenderList();
         }));
+        actions.Children.Add(zoomHint);
+    }
+    private void ZoomEditor(TextEditor editor, int delta)
+    {
+        if (delta == 0) return;
+        configurationEditorFontSize = Math.Clamp(configurationEditorFontSize + Math.Sign(delta), 10, 28);
+        editor.FontSize = configurationEditorFontSize;
     }
     private void BackupsPage()
     {

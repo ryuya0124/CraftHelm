@@ -203,6 +203,18 @@ await Test("All generated Minecraft 1.21.1 property keys have Japanese labels", 
     Check(keys.Length >= 60);
     foreach (var key in keys) Check(PropertyFields.For(key, "").Label != "追加設定（翻訳未登録）", "Missing translation: " + key);
 }));
+await Test("Legacy difficulty and game mode numbers map to readable choices", () => Sync(() =>
+{
+    string[] difficulties = ["peaceful", "easy", "normal", "hard"];
+    string[] modes = ["survival", "creative", "adventure", "spectator"];
+    for (var i = 0; i < 4; i++)
+    {
+        Check(PropertyFields.VisibleChoice("difficulty", i.ToString()) == difficulties[i]);
+        Check(PropertyFields.VisibleChoice("gamemode", i.ToString()) == modes[i]);
+    }
+    Check(PropertyFields.VisibleChoice("difficulty", "hard") == "hard");
+    Check(PropertyFields.VisibleChoice("other", "3") == "3");
+}));
 await Test("MOD JSON field edits preserve Unicode offsets, unknown data and arrays", () => Sync(() =>
 {
     const string source = "{\"日本語\":\"保持\", \"server\": {\"enabled\":true, \"modpackName\":\"old\", \"syncedFiles\":[\"mods/**\"]}, \"unknown\":[1,{\"x\":2}], \"DO_NOT_CHANGE_IT\":3}";
