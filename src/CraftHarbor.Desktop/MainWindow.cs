@@ -712,9 +712,25 @@ public sealed class MainWindow : Window
     }
     private void FilesPage()
     {
-        var p = Selected!; var root = store.ServerDir(p); ContentPanel.Children.Add(Btn("ゲーム・接続の設定を開く", () => Navigate("properties"))); var card = Card(ContentPanel, "設定ファイルを探して編集"); card.Children.Add(Text("左の一覧からファイルを選び、右で編集します。停止中に保存でき、保存前のファイルは履歴に退避します。server-portは起動設定のポートが優先されます。"));
-        if (p.Engine == "paper") card.Children.Add(Text("Paperの既存ワールドの難易度は、コンソールで difficulty hard などを送信して変更してください。設定ファイルだけでは既存ワールドへ反映されない場合があります。", 12));
-        card.Children.Add(Text("FTBのSNBT、JSON5/JSONC、CFG、KubeJSのJS、CraftTweakerのZSにも対応。JSON以外の構文・値は各MOD側で検証されます。最大500件・1ファイル1MB未満。", 12));
+        var p = Selected!; var root = store.ServerDir(p);
+        // The detail pane is a StackPanel, so give this page a finite viewport height.
+        // Its inner star rows can then grow and shrink with the window.
+        var pageLayout = new Grid { MinHeight = 480 };
+        pageLayout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        pageLayout.RowDefinitions.Add(new RowDefinition());
+        pageLayout.SetBinding(FrameworkElement.HeightProperty, new Binding(nameof(ActualHeight)) { Source = detailRightScroll });
+        ContentPanel.Children.Add(pageLayout);
+        pageLayout.Children.Add(Btn("ゲーム・接続の設定を開く", () => Navigate("properties")));
+        var card = new Grid();
+        card.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        card.RowDefinitions.Add(new RowDefinition());
+        var cardBorder = new Border { Background = Brush("Surface"), CornerRadius = new CornerRadius(10), Padding = new Thickness(20), Margin = new Thickness(0, 4, 0, 0), Child = card };
+        Grid.SetRow(cardBorder, 1); pageLayout.Children.Add(cardBorder);
+        var header = new StackPanel(); card.Children.Add(header);
+        header.Children.Add(new TextBlock { Text = "設定ファイルを探して編集", FontSize = 20, FontWeight = FontWeights.SemiBold, Foreground = Brush("Ink"), Margin = new Thickness(0, 0, 0, 10) });
+        header.Children.Add(Text("左のフォルダを展開してファイルを選び、右で編集します。停止中に保存でき、保存前のファイルは履歴に退避します。server-portは起動設定のポートが優先されます。"));
+        if (p.Engine == "paper") header.Children.Add(Text("Paperの既存ワールドの難易度は、コンソールで difficulty hard などを送信して変更してください。設定ファイルだけでは既存ワールドへ反映されない場合があります。", 12));
+        header.Children.Add(Text("FTBのSNBT、JSON5/JSONC、CFG、KubeJSのJS、CraftTweakerのZSにも対応。JSON以外の構文・値は各MOD側で検証されます。最大500件・1ファイル1MB未満。", 12));
         List<ConfigurationFileEntry> entries = ReadEntries();
         List<ConfigurationFileEntry> ReadEntries()
         {
@@ -724,23 +740,30 @@ public sealed class MainWindow : Window
         }
         var search = new TextBox { Name = "ConfigSearch" };
         System.Windows.Automation.AutomationProperties.SetName(search, "設定ファイルを名前やパスで検索");
-        card.Children.Add(new TextBlock { Text = "ファイル名・フォルダ名で検索", Foreground = Brush("Label") }); card.Children.Add(search);
-        var categories = new WrapPanel { Name = "ConfigCategories" }; card.Children.Add(categories);
-        var count = Text("", 12); card.Children.Add(count);
-        var columns = new Grid(); columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(215) }); columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) }); columns.ColumnDefinitions.Add(new ColumnDefinition());
-        columns.SizeChanged += (_, _) => columns.ColumnDefinitions[0].Width = new GridLength(columns.ActualWidth < 600 ? 160 : 215);
-        var list = new ListBox { Name = "ConfigFiles", Height = 470, Style = (Style)FindResource("ServerListStyle"), ItemTemplate = (DataTemplate)FindResource("ConfigurationFileItem") };
-        columns.Children.Add(list);
-        var right = new StackPanel(); Grid.SetColumn(right, 2); columns.Children.Add(right);
+        header.Children.Add(new TextBlock { Text = "ファイル名・フォルダ名で検索", Foreground = Brush("Label") }); header.Children.Add(search);
+        var categories = new WrapPanel { Name = "ConfigCategories" }; header.Children.Add(categories);
+        var count = Text("", 12); header.Children.Add(count);
+        var columns = new Grid { MinHeight = 180 }; columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(215) }); columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) }); columns.ColumnDefinitions.Add(new ColumnDefinition());
+        columns.SizeChanged += (_, _) =>
+        {
+            var width = Math.Clamp(columns.ActualWidth * 0.26, 180, 360);
+            if (Math.Abs(columns.ColumnDefinitions[0].ActualWidth - width) > 1) columns.ColumnDefinitions[0].Width = new GridLength(width);
+        };
+        Grid.SetRow(columns, 1); card.Children.Add(columns);
+        var tree = new TreeView { Name = "ConfigFiles", Background = Brush("Input"), Foreground = Brush("Ink"), BorderThickness = new Thickness(0), Padding = new Thickness(5) };
+        columns.Children.Add(tree);
+        var right = new Grid(); right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); right.RowDefinitions.Add(new RowDefinition());
+        Grid.SetColumn(right, 2); columns.Children.Add(right);
         var selectedPath = new TextBlock { Name = "ConfigSelectedPath", FontWeight = FontWeights.SemiBold, Foreground = Brush("Accent"), Margin = new Thickness(0, 0, 0, 8) }; right.Children.Add(selectedPath);
-        var actions = new WrapPanel(); right.Children.Add(actions);
+        var actions = new WrapPanel(); Grid.SetRow(actions, 1); right.Children.Add(actions);
         var editor = new TextEditor
         {
-            Name = "ConfigEditor", Height = 395, FontFamily = new FontFamily("Consolas"), FontSize = 13,
+            Name = "ConfigEditor", FontFamily = new FontFamily("Consolas"), FontSize = 13,
             ShowLineNumbers = true, Background = Brush("Input"), Foreground = Brush("Ink"), LineNumbersForeground = Brush("Muted"),
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
         };
-        right.Children.Add(new Border { Background = Brush("Input"), BorderBrush = Brush("Border"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Child = editor }); card.Children.Add(columns);
+        var editorBorder = new Border { Background = Brush("Input"), BorderBrush = Brush("Border"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Child = editor };
+        Grid.SetRow(editorBorder, 2); right.Children.Add(editorBorder);
         string current = "server.properties"; string category = "すべて"; bool dirty = false; bool loading = false; bool changingSelection = false;
         void Load(string path)
         {
@@ -750,14 +773,48 @@ public sealed class MainWindow : Window
             editor.Text = File.Exists(file) ? File.ReadAllText(file) : current == "server.properties" ? "online-mode=true\nserver-port=" + p.Port : "";
             dirty = false; selectedPath.Text = current.Replace('\\', '/'); loading = false;
         }
+        var expandedFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var fileNodes = new Dictionary<string, TreeViewItem>(StringComparer.OrdinalIgnoreCase);
+        void RememberExpanded(ItemCollection nodes)
+        {
+            foreach (var node in nodes.OfType<TreeViewItem>())
+            {
+                if (node.Tag is string folder && node.IsExpanded) expandedFolders.Add(folder);
+                RememberExpanded(node.Items);
+            }
+        }
         void RenderList()
         {
             var filtered = entries.Where(e => (category is "すべて" or "最近" || e.Category == category)
                 && e.RelativePath.Contains(search.Text.Trim(), StringComparison.OrdinalIgnoreCase));
             var visible = category == "最近" ? filtered.OrderByDescending(e => e.LastModifiedUtc).Take(25).ToArray()
                 : filtered.OrderBy(e => e.RelativePath.Equals("server.properties", StringComparison.OrdinalIgnoreCase) ? 0 : 1).ThenBy(e => e.RelativePath, StringComparer.OrdinalIgnoreCase).ToArray();
-            changingSelection = true; list.ItemsSource = visible;
-            list.SelectedItem = visible.FirstOrDefault(e => e.RelativePath.Equals(current, StringComparison.OrdinalIgnoreCase));
+            changingSelection = true;
+            expandedFolders.Clear(); RememberExpanded(tree.Items);
+            tree.Items.Clear(); fileNodes.Clear();
+            var folders = new Dictionary<string, TreeViewItem>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in visible)
+            {
+                var parts = entry.RelativePath.Replace('\\', '/').Split('/');
+                ItemCollection children = tree.Items;
+                var folderPath = "";
+                for (var i = 0; i < parts.Length - 1; i++)
+                {
+                    folderPath = folderPath.Length == 0 ? parts[i] : folderPath + "/" + parts[i];
+                    if (!folders.TryGetValue(folderPath, out var folder))
+                    {
+                        folder = new TreeViewItem { Header = parts[i], Tag = folderPath, Style = (Style)FindResource("ConfigTreeItemStyle") };
+                        folders.Add(folderPath, folder); children.Add(folder);
+                    }
+                    children = folder.Items;
+                }
+                var file = new TreeViewItem { Header = parts[^1], Tag = entry, Style = (Style)FindResource("ConfigTreeItemStyle") };
+                children.Add(file); fileNodes.Add(entry.RelativePath, file);
+            }
+            var selectedVisible = fileNodes.TryGetValue(current, out var selected);
+            foreach (var (path, folder) in folders)
+                folder.IsExpanded = search.Text.Length > 0 || expandedFolders.Contains(path);
+            if (selectedVisible) selected!.IsSelected = true;
             changingSelection = false;
             count.Text = $"{visible.Length} 件表示  •  全 {entries.Count} 件";
             foreach (var button in categories.Children.OfType<Button>())
@@ -777,12 +834,15 @@ public sealed class MainWindow : Window
             if (!categories.Children.OfType<Button>().Any(b => b.Tag?.ToString() == category)) category = "すべて";
         }
         search.TextChanged += (_, _) => RenderList();
-        list.SelectionChanged += (_, _) =>
+        tree.SelectedItemChanged += (_, _) =>
         {
-            if (changingSelection || list.SelectedItem is not ConfigurationFileEntry entry || entry.RelativePath == current) return;
+            if (changingSelection || tree.SelectedItem is not TreeViewItem { Tag: ConfigurationFileEntry entry } || entry.RelativePath == current) return;
             if (dirty && !Confirm("未保存の編集を破棄して別のファイルを開きますか？"))
             {
-                changingSelection = true; list.SelectedItem = list.Items.OfType<ConfigurationFileEntry>().FirstOrDefault(e => e.RelativePath == current); changingSelection = false; return;
+                changingSelection = true;
+                if (fileNodes.TryGetValue(current, out var previous)) previous.IsSelected = true;
+                else ((TreeViewItem)tree.SelectedItem).IsSelected = false;
+                changingSelection = false; return;
             }
             Load(entry.RelativePath);
         };
