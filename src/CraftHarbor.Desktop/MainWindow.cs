@@ -276,7 +276,7 @@ public sealed class MainWindow : Window
         var info = Card(ContentPanel, "このサーバーの構成"); info.Children.Add(Text($"種類: {JapaneseDisplay.Label(p.Engine)}   Minecraft: {p.Version}\nメモリ: {p.MinMemoryMb} – {p.MaxMemoryMb} MB\nJava: {p.JavaPath}\n起動: {(p.LaunchArgs.Length == 0 ? p.Jar : string.Join(" ", p.LaunchArgs))}\n保存先: {store.ServerDir(p)}"));
         info.Children.Add(Text("起動前にJavaとMODの対応バージョンを確認してください。Java要件はサーバーのダウンロード後に表示します。"));
         var next = Card(ContentPanel, "次の操作");
-        next.Children.Add(Text("左側からコンソール、バックアップ、サーバー設定、MOD・プラグインの画面を選んでください。"));
+        next.Children.Add(Text("左側からコンソール、バックアップ、サーバー設定を選べます。MOD・プラグインはサーバー設定の中で管理できます。"));
     }
     private void Start(ServerProfile p)
     {
