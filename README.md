@@ -9,18 +9,18 @@
 
 ## ダウンロード
 
-[GitHub Releases](https://github.com/ryuya0124/CraftHelm/releases) の **`CraftHelm-0.1.10-win-x64-setup.exe`** を実行してください。管理者権限不要、.NETランタイム同梱です。スタートメニューにCraftHelmとアンインストール項目を登録します。[インストール・更新・削除の手順](docs/INSTALLATION.md)。
+[GitHub Releases](https://github.com/ryuya0124/CraftHelm/releases) の **`CraftHelm-0.1.11-win-x64-setup.exe`** を実行してください。管理者権限不要、.NETランタイム同梱です。スタートメニューにCraftHelmとアンインストール項目を登録します。[インストール・更新・削除の手順](docs/INSTALLATION.md)。
 
 ZIP版も利用できます。`portable.zip` は.NET 10 Desktop Runtime x64が必要、`standalone.zip` はランタイム同梱です。
 
-**v0.1.10 / プレビュー**。名称を変更しました。[命名調査と移行について](docs/NAME_RESEARCH.md)。設定画面を日本語名と用途別の階層に整理し、AutoModpackなどの[MOD設定GUI](docs/JAPANESE_SETTINGS.md)を追加しました。[server.propertiesのGUI設定](docs/SERVER_PROPERTIES.md)と[GitHub Releasesによる自動更新](docs/UPDATES.md)に対応しました。起動時にローディング画面を先に表示し、バックグラウンドでサーバー一覧を読み込みます。[MOD設定の保持](docs/MOD_CONFIGURATIONS.md)。[AutoModpackとの併用](docs/AUTOMODPACK.md) / [MOD・設定の検証記録](docs/FEATURE_VALIDATION.md) / [サーバー本体の検証記録](docs/REAL_SERVER_VALIDATION.md)。すべてのMOD・パック・サーバー実装を自動的に扱える製品ではありません。
+**v0.1.11 / プレビュー**。画面を用途別ページに分け、サーバー削除と一覧の自動更新、バックアップの進捗と高速保存に対応しました。[画面とデータの扱い](docs/UI_AND_BACKUP.md)。名称はv0.1.10で変更しました。[命名調査と移行について](docs/NAME_RESEARCH.md)。設定画面を日本語名と用途別の階層に整理し、AutoModpackなどの[MOD設定GUI](docs/JAPANESE_SETTINGS.md)を追加しました。[server.propertiesのGUI設定](docs/SERVER_PROPERTIES.md)と[GitHub Releasesによる自動更新](docs/UPDATES.md)に対応しました。起動時にローディング画面を先に表示し、バックグラウンドでサーバー一覧を読み込みます。[MOD設定の保持](docs/MOD_CONFIGURATIONS.md)。[AutoModpackとの併用](docs/AUTOMODPACK.md) / [MOD・設定の検証記録](docs/FEATURE_VALIDATION.md) / [サーバー本体の検証記録](docs/REAL_SERVER_VALIDATION.md)。すべてのMOD・パック・サーバー実装を自動的に扱える製品ではありません。
 
 ## できること
 
 | 分野 | 対応 |
 |---|---|
 | 表示 | ダーク／ライト切替・保存、テーマ対応の選択欄・内部ダイアログ、専用アイコン |
-| サーバー | 複数プロファイル、起動・通常停止・再起動・明示的な強制終了 |
+| サーバー | 複数プロファイル、起動・通常停止・再起動・明示的な強制終了、選択サーバーの削除と消失フォルダの一覧反映 |
 | 自動導入 | Vanilla / Paper / Fabric / Folia。バージョン選択、Fabricローダー固定 |
 | 既存環境 | 停止済みサーバーフォルダのコピー。Forge / NeoForge / Quilt / 独自JARのJava起動引数 |
 | Java | 既存Javaの検出、Temurin JRE 8 / 11 / 17 / 21 / 25の専用フォルダ導入・サーバー別割当 |
@@ -33,15 +33,15 @@ ZIP版も利用できます。`portable.zip` は.NET 10 Desktop Runtime x64が�
 | アプリ更新 | 起動後・24時間ごとにGitHub Releasesを確認し、検証済み更新を通常終了後に適用 |
 | MOD設定GUI | JSON・単純なTOMLの値を項目別に編集。AutoModpack・共通項目の日本語名、文字列配列、未知の内容とコメントの保持 |
 | 設定 | JSON / TOML / YAML / properties / txt / confを編集、JSON構文検証、旧版保存 |
-| バックアップ | 停止中の全体ZIP、ステージング復元、復元前フォルダの保存 |
+| バックアップ | 停止中の全体ZIP、進捗・キャンセル、高速／圧縮の選択、ステージング復元、復元前フォルダの保存 |
 | 情報 | OS・論理CPU数・メモリ指標・ディスク空き・LAN IPv4・TCP待受・疎通 |
 
 ## 最初の起動
 
 1. 「サーバーを追加」で名前を決めます。
-2. 「起動設定」で種類・Minecraftバージョンを選び、本体を導入します。
-3. 「Java ランタイム」で必要なJavaを導入し、左側のサーバーへ割り当てます。
-4. 起動設定でメモリ・ポートを調整し、Minecraft EULAを読んで同意します。
+2. 「種類とバージョン」でサーバーの種類を選び、「本体の導入」を開きます。
+3. 「Javaの管理」で必要なJavaを導入し、選択サーバーへ割り当てます。
+4. 「Java・メモリ・ポート」で設定し、Minecraft EULAを読んで同意します。
 5. 「概要」から起動。「コンソール」の `Done` を確認して接続します。
 
 既存サーバーを遊びながらCraftHelmを試せます。**別アプリから起動されたJavaプロセスには接続・停止しません。** 既存フォルダを取り込む場合だけ、元のサーバーを停止できる時間にコピーしてください。

@@ -17,13 +17,13 @@ internal static class Program
         {
             var app = new Application(); app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("pack://application:,,,/CraftHarbor;component/Styles.xaml") }); app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             SynchronizationContext.SetSynchronizationContext(new System.Windows.Threading.DispatcherSynchronizationContext());
-            var store = new HarborStore(root); var p = store.Add("Harbor Survival"); p.Engine = "fabric"; store.Save();
+            var store = new HarborStore(root); var p = store.Add("Harbor Survival"); p.Engine = "fabric"; p.Port = 25572; store.Save();
             var window = new MainWindow(root);
             var navigate = typeof(MainWindow).GetMethod("Navigate", BindingFlags.NonPublic | BindingFlags.Instance)!;
             var content = (FrameworkElement)window.Content;
             void Layout() { content.Measure(new Size(1240, 840)); content.Arrange(new Rect(0, 0, 1240, 840)); content.UpdateLayout(); }
             for (int pass = 0; pass < 2; pass++)
-                foreach (var key in new[] { "overview", "console", "launch", "mods", "modsettings", "properties", "files", "backups", "java", "system", "help", "updates", "appearance" })
+                foreach (var key in new[] { "overview", "console", "backups", "launch", "resources", "advanced", "install", "import", "properties", "manage", "mods", "modsearch", "presets", "modpacks", "automodpack", "modsettings", "files", "java", "system", "network", "help", "updates", "appearance" })
                 {
                     navigate.Invoke(window, [key]); Layout();
                     Console.WriteLine($"PASS UI navigation/layout {key} round {pass + 1}");
@@ -55,7 +55,7 @@ internal static class Program
                 Theme.Apply(appearance, true);
                 Theme.Load(root);
                 if (Theme.Appearance != appearance) throw new Exception("Theme preference did not persist");
-                foreach (var key in new[] { "overview", "console", "launch", "mods", "modsettings", "properties", "files", "backups", "java", "system", "help", "updates", "appearance" })
+                foreach (var key in new[] { "overview", "console", "backups", "launch", "resources", "advanced", "install", "import", "properties", "manage", "mods", "modsearch", "presets", "modpacks", "automodpack", "modsettings", "files", "java", "system", "network", "help", "updates", "appearance" })
                 {
                     navigate.Invoke(window, [key]); Layout();
                     var expected = ((SolidColorBrush)app.Resources["Input"]).Color;
@@ -95,6 +95,18 @@ internal static class Program
                 if (File.ReadAllText(Path.Combine(serverDir, relative)) != "edited 日本語") throw new Exception("Save failed " + relative);
             }
             navigate.Invoke(window, ["mods"]); Layout();
+            if (Descendants(content).OfType<ListBox>().Single(x => x.Name == "InstalledJars").Height < 400) throw new Exception("Installed MOD list is too small");
+            navigate.Invoke(window, ["backups"]); Layout();
+            if (!Descendants(content).OfType<ProgressBar>().Any(x => x.Name == "BackupProgress") || !Descendants(content).OfType<Button>().Any(b => b.Content?.ToString() == "保存先を開く")) throw new Exception("Backup progress or destination control is missing");
+            var busyField = typeof(MainWindow).GetField("busy", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            var factory = typeof(MainWindow).GetMethod("Btn", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            var opened = false;
+            var openDuringBackup = (Button)factory.Invoke(window, ["保存先を開く", (Action)(() => opened = true), false, true])!;
+            busyField.SetValue(window, true); openDuringBackup.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); busyField.SetValue(window, false);
+            if (!opened) throw new Exception("Opening backup destination was blocked while busy");
+            navigate.Invoke(window, ["manage"]); Layout();
+            if (!Descendants(content).OfType<Button>().Any(b => b.Content?.ToString() == "一覧からのみ削除") || !Descendants(content).OfType<Button>().Any(b => b.Content?.ToString() == "サーバーフォルダもゴミ箱へ移動")) throw new Exception("Selected server deletion choices are missing");
+            navigate.Invoke(window, ["presets"]); Layout();
             if (Descendants(content).OfType<CheckBox>().Single(b => b.Content?.ToString()?.StartsWith("現在の設定を維持") == true).IsChecked != true) throw new Exception("Preserve settings must be default");
             Console.WriteLine("PASS extended MOD config UI edits and preservation default");
             File.WriteAllText(Path.Combine(autoDir, "automodpack-server.json"), "{\"DO_NOT_CHANGE_IT\":7,\"modpackName\":\"元の名前\",\"generateModpackOnStart\":false,\"syncedFiles\":[\"mods/**\"],\"extra\":{\"unknown\":12}}" );
@@ -109,20 +121,19 @@ internal static class Program
             if (autoSaved["modpackName"]!.ToString() != "日本語の同期構成" || !autoSaved["generateModpackOnStart"]!.GetValue<bool>() || autoSaved["syncedFiles"]!.AsArray().Count != 2 || autoSaved["extra"]!["unknown"]!.GetValue<int>() != 12 || autoSaved["DO_NOT_CHANGE_IT"]!.GetValue<int>() != 7) throw new Exception("MOD settings GUI changed unrelated values or failed save");
             if (Descendants(content).OfType<TextBox>().Single(t => t.Tag?.ToString() == "modpackName").Text != "日本語の同期構成") throw new Exception("MOD settings reopen failed");
             if (args.Length > 0) SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, "japanese-mod-settings.png"));
-            var groups = Descendants(content).OfType<WrapPanel>().Single(x => x.Name == "NavigationGroups");
-            if (groups.Children.Count != 4) throw new Exception("Top navigation must have four categories");
-            groups.Children.OfType<Button>().Single(b => b.Content?.ToString() == "サーバー設定").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
-            var section = Descendants(content).OfType<WrapPanel>().Single(x => x.Name == "SectionCategories");
-            section.Children.OfType<Button>().Single(b => b.Content?.ToString() == "Java・メモリ・接続").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
+            var links = Descendants(content).OfType<StackPanel>().Single(x => x.Name == "NavigationLinks");
+            if (links.Children.OfType<Button>().Count() < 20) throw new Exception("Page navigation is incomplete");
+            if (Descendants(content).OfType<WrapPanel>().Any(x => x.Name is "NavigationGroups" or "SectionCategories")) throw new Exception("Old stacked navigation remains");
+            links.Children.OfType<Button>().Single(b => b.Name == "Navresources").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
             var javaInput = Descendants(content).OfType<TextBox>().Single(t => System.Windows.Automation.AutomationProperties.GetName(t) == "Java実行ファイルの場所");
-            if (!javaInput.IsEnabled || section.Children.OfType<Button>().Count(b => ((FrameworkElement)b.Tag).Visibility == Visibility.Visible) != 1) throw new Exception("Launch category filtering failed");
-            Console.WriteLine("PASS Japanese MOD form save/reopen, nested unknown values, arrays and hierarchical navigation");
+            if (!javaInput.IsEnabled || Descendants(content).OfType<TextBox>().Any(t => System.Windows.Automation.AutomationProperties.GetName(t) == "Minecraft バージョン")) throw new Exception("Server resource page is not separate");
+            Console.WriteLine("PASS Japanese MOD form save/reopen, nested unknown values, arrays and separate page navigation");
             navigate.Invoke(window, ["console"]); Layout();
             foreach (var command in new[] { "automodpack", "automodpack host", "automodpack generate", "automodpack config reload" })
                 if (!Descendants(content).OfType<Button>().Any(b => b.Tag?.ToString() == command)) throw new Exception("Missing AutoModpack command");
             Console.WriteLine("PASS AutoModpack config discovery/save/history and console commands");
             var propertiesPath = Path.Combine(serverDir, "server.properties");
-            File.WriteAllText(propertiesPath, "# retain\nmotd=before\nmax-players=20\ndifficulty=easy\ngamemode=survival\nwhite-list=false\nserver-port=25565\nrcon.password=hidden\ncustom.setting=keep\n");
+            File.WriteAllText(propertiesPath, "# retain\nmotd=before\nmax-players=20\ndifficulty=easy\ngamemode=survival\nwhite-list=false\nserver-port=25572\nrcon.password=hidden\ncustom.setting=keep\n");
             navigate.Invoke(window, ["properties"]); Layout();
             Descendants(content).OfType<TextBox>().Single(x => x.Tag?.ToString() == "motd").Text = "日本語サーバー";
             Descendants(content).OfType<TextBox>().Single(x => x.Tag?.ToString() == "max-players").Text = "8";
@@ -137,7 +148,12 @@ internal static class Program
             if (Descendants(content).OfType<TextBox>().Single(x => x.Tag?.ToString() == "motd").Text != "日本語サーバー") throw new Exception("GUI properties reopen failed");
             Console.WriteLine("PASS server.properties GUI edit/save/reopen, port sync, secret field and comment preservation");
             navigate.Invoke(window, ["overview"]); Layout();
-            typeof(MainWindow).GetMethod("Tick", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, null);
+            var windowStore = (HarborStore)typeof(MainWindow).GetField("store", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+            var removed = windowStore.Add("external-folder-deleted");
+            typeof(MainWindow).GetMethod("RefreshServers", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [null]);
+            Directory.Delete(windowStore.ServerDir(removed));
+            for (var i = 0; i < 10; i++) typeof(MainWindow).GetMethod("Tick", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, null);
+            if (windowStore.Profiles.Any(x => x.Id == removed.Id) || Descendants(content).OfType<ListBox>().First().Items.Count != 1) throw new Exception("Deleted server folder remains in the sidebar");
             Layout();
             Console.WriteLine($"INFO UI process working set: {System.Diagnostics.Process.GetCurrentProcess().WorkingSet64 / 1048576d:F1} MB (test host)");
             if (args.Length > 0)
