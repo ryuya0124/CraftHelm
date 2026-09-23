@@ -23,7 +23,7 @@ internal static class Program
             var content = (FrameworkElement)window.Content;
             void Layout() { content.Measure(new Size(1240, 840)); content.Arrange(new Rect(0, 0, 1240, 840)); content.UpdateLayout(); }
             for (int pass = 0; pass < 2; pass++)
-                foreach (var key in new[] { "overview", "console", "backups", "launch", "resources", "advanced", "install", "import", "properties", "manage", "mods", "modsearch", "presets", "modpacks", "automodpack", "modsettings", "files", "java", "system", "network", "help", "updates", "appearance" })
+                foreach (var key in new[] { "overview", "console", "backups", "server-settings", "launch", "resources", "advanced", "install", "import", "properties", "manage", "mods", "modsearch", "presets", "modpacks", "automodpack", "modsettings", "files", "settings", "java", "system", "network", "help", "updates", "appearance" })
                 {
                     navigate.Invoke(window, [key]); Layout();
                     Console.WriteLine($"PASS UI navigation/layout {key} round {pass + 1}");
@@ -55,7 +55,7 @@ internal static class Program
                 Theme.Apply(appearance, true);
                 Theme.Load(root);
                 if (Theme.Appearance != appearance) throw new Exception("Theme preference did not persist");
-                foreach (var key in new[] { "overview", "console", "backups", "launch", "resources", "advanced", "install", "import", "properties", "manage", "mods", "modsearch", "presets", "modpacks", "automodpack", "modsettings", "files", "java", "system", "network", "help", "updates", "appearance" })
+                foreach (var key in new[] { "overview", "console", "backups", "server-settings", "launch", "resources", "advanced", "install", "import", "properties", "manage", "mods", "modsearch", "presets", "modpacks", "automodpack", "modsettings", "files", "settings", "java", "system", "network", "help", "updates", "appearance" })
                 {
                     navigate.Invoke(window, [key]); Layout();
                     var expected = ((SolidColorBrush)app.Resources["Input"]).Color;
@@ -65,7 +65,7 @@ internal static class Program
                         if (box.Template.FindName("PART_Popup", box) is not System.Windows.Controls.Primitives.Popup popup || popup.Child is not Border popupBorder || ((SolidColorBrush)popupBorder.Background).Color != expected) throw new Exception("Dropdown has incorrect theme");
                     }
                     if (((SolidColorBrush)((Grid)content).Background).Color != ((SolidColorBrush)app.Resources["Background"]).Color) throw new Exception("Local background did not update");
-                    if (args.Length > 0 && key is "launch" or "appearance") SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, $"{appearance.ToLowerInvariant()}-{key}.png"));
+                    if (args.Length > 0 && key is "launch" or "appearance" or "server-settings" or "mods") SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, $"{appearance.ToLowerInvariant()}-{key}.png"));
                 }
                 var dialog = HarborDialog.Create(null, "テーマの確認ダイアログ", "確認", MessageBoxButton.YesNo, out var result);
                 dialog.ApplyTemplate();
@@ -122,9 +122,21 @@ internal static class Program
             if (Descendants(content).OfType<TextBox>().Single(t => t.Tag?.ToString() == "modpackName").Text != "日本語の同期構成") throw new Exception("MOD settings reopen failed");
             if (args.Length > 0) SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, "japanese-mod-settings.png"));
             var links = Descendants(content).OfType<StackPanel>().Single(x => x.Name == "NavigationLinks");
-            if (links.Children.OfType<Button>().Count() < 20) throw new Exception("Page navigation is incomplete");
+            if (links.Children.OfType<Button>().Count() != 4 || links.Children.OfType<Button>().Any(b => b.Name is "Navappearance" or "Navmods")) throw new Exception("Primary navigation contains detail pages");
             if (Descendants(content).OfType<WrapPanel>().Any(x => x.Name is "NavigationGroups" or "SectionCategories")) throw new Exception("Old stacked navigation remains");
-            links.Children.OfType<Button>().Single(b => b.Name == "Navresources").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
+            Descendants(content).OfType<Button>().Single(b => b.Content?.ToString() == "アプリ設定").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
+            var appLinks = Descendants(content).OfType<StackPanel>().Single(x => x.Name == "SettingsNavigation");
+            if (appLinks.Children.OfType<Button>().Count() != 7 || Descendants(content).OfType<TextBlock>().Any(t => t.Text?.Contains("Minecraft 1.21") == true)) throw new Exception("App settings hub or server-independent breadcrumb is incorrect");
+            appLinks.Children.OfType<Button>().Single(b => b.Name == "SettingNavappearance").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
+            if (!Descendants(content).OfType<TextBlock>().Any(t => t.Text == "自分に合った明るさで")) throw new Exception("Appearance setting did not open");
+            links.Children.OfType<Button>().Single(b => b.Name == "Navserversettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
+            var serverLinks = Descendants(content).OfType<StackPanel>().Single(x => x.Name == "ServerSettingsNavigation");
+            if (serverLinks.Children.OfType<Button>().Count() != 15 || !serverLinks.Children.OfType<Button>().Any(b => b.Name == "ServerSettingNavmodsettings")) throw new Exception("Server settings sections are incomplete");
+            var serverList = Descendants(content).OfType<ListBox>().First();
+            if (serverList.ContextMenu?.Items.OfType<MenuItem>().Count() != 2 || !serverList.ContextMenu.Items.OfType<MenuItem>().Any(x => x.Header?.ToString() == "サーバーを削除…")) throw new Exception("Server context menu is missing");
+            serverList.ContextMenu.Items.OfType<MenuItem>().Single(x => x.Header?.ToString() == "サーバーを削除…").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); Layout();
+            if (!Descendants(content).OfType<Button>().Any(b => b.Content?.ToString() == "一覧からのみ削除")) throw new Exception("Context menu did not open server deletion choices");
+            Descendants(content).OfType<StackPanel>().Single(x => x.Name == "ServerSettingsNavigation").Children.OfType<Button>().Single(b => b.Name == "ServerSettingNavresources").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
             var javaInput = Descendants(content).OfType<TextBox>().Single(t => System.Windows.Automation.AutomationProperties.GetName(t) == "Java実行ファイルの場所");
             if (!javaInput.IsEnabled || Descendants(content).OfType<TextBox>().Any(t => System.Windows.Automation.AutomationProperties.GetName(t) == "Minecraft バージョン")) throw new Exception("Server resource page is not separate");
             Console.WriteLine("PASS Japanese MOD form save/reopen, nested unknown values, arrays and separate page navigation");
@@ -189,7 +201,15 @@ internal static class Program
             Console.WriteLine("RESULT UI smoke passed; no Minecraft processes launched"); return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
-        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                if (Environment.GetEnvironmentVariable("CI") == "true") Directory.Delete(root, true);
+                else Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(root,
+                    Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+            }
+        }
     }
     private static void SaveImage(FrameworkElement content, string path)
     {
