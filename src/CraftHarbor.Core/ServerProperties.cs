@@ -95,6 +95,17 @@ public sealed record PropertyField(string Key, string Label, string Group, strin
 
 public static class PropertyFields
 {
+    public static string VisibleChoice(string key, string value)
+    {
+        string[] names = key switch
+        {
+            "difficulty" => ["peaceful", "easy", "normal", "hard"],
+            "gamemode" => ["survival", "creative", "adventure", "spectator"],
+            _ => []
+        };
+        return int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number >= 0 && number < names.Length
+            ? names[number] : value;
+    }
     public static readonly PropertyField[] All = [
         new("motd", "サーバーの説明（MOTD）", "基本"), new("max-players", "最大プレイヤー数", "基本", "number", Min: 1),
         new("difficulty", "難易度", "基本", Options: ["peaceful", "easy", "normal", "hard", "0", "1", "2", "3"]),
