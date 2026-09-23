@@ -9,11 +9,11 @@
 
 ## ダウンロード
 
-[GitHub Releases](https://github.com/ryuya0124/CraftHelm/releases) の **`CraftHelm-0.1.12-win-x64-setup.exe`** を実行してください。管理者権限不要、.NETランタイム同梱です。スタートメニューにCraftHelmとアンインストール項目を登録します。[インストール・更新・削除の手順](docs/INSTALLATION.md)。
+[GitHub Releases](https://github.com/ryuya0124/CraftHelm/releases) の **`CraftHelm-0.1.13-win-x64-setup.exe`** を実行してください。管理者権限不要、.NETランタイム同梱です。スタートメニューにCraftHelmとアンインストール項目を登録します。[インストール・更新・削除の手順](docs/INSTALLATION.md)。
 
 ZIP版も利用できます。`portable.zip` は.NET 10 Desktop Runtime x64が必要、`standalone.zip` はランタイム同梱です。
 
-**v0.1.12 / プレビュー**。アプリ設定とサーバー設定をそれぞれ独立した画面にまとめ、詳細を画面内の左メニューから選べるようにしました。サーバー名の右クリックから設定・削除を開けます。[画面とデータの扱い](docs/UI_AND_BACKUP.md)。名称はv0.1.10で変更しました。[命名調査と移行について](docs/NAME_RESEARCH.md)。設定画面を日本語名と用途別の階層に整理し、AutoModpackなどの[MOD設定GUI](docs/JAPANESE_SETTINGS.md)を追加しました。[server.propertiesのGUI設定](docs/SERVER_PROPERTIES.md)と[GitHub Releasesによる自動更新](docs/UPDATES.md)に対応しました。起動時にローディング画面を先に表示し、バックグラウンドでサーバー一覧を読み込みます。[MOD設定の保持](docs/MOD_CONFIGURATIONS.md)。[AutoModpackとの併用](docs/AUTOMODPACK.md) / [MOD・設定の検証記録](docs/FEATURE_VALIDATION.md) / [サーバー本体の検証記録](docs/REAL_SERVER_VALIDATION.md)。すべてのMOD・パック・サーバー実装を自動的に扱える製品ではありません。
+**v0.1.13 / プレビュー**。設定画面の左右を独立してスクロールできるようにし、タブを切り替えても左メニューの位置を保持します。サーバー名の右クリックメニューの白い余白も修正しました。[画面とデータの扱い](docs/UI_AND_BACKUP.md)。名称はv0.1.10で変更しました。[命名調査と移行について](docs/NAME_RESEARCH.md)。設定画面を日本語名と用途別の階層に整理し、AutoModpackなどの[MOD設定GUI](docs/JAPANESE_SETTINGS.md)を追加しました。[server.propertiesのGUI設定](docs/SERVER_PROPERTIES.md)と[GitHub Releasesによる自動更新](docs/UPDATES.md)に対応しました。起動時にローディング画面を先に表示し、バックグラウンドでサーバー一覧を読み込みます。[MOD設定の保持](docs/MOD_CONFIGURATIONS.md)。[AutoModpackとの併用](docs/AUTOMODPACK.md) / [MOD・設定の検証記録](docs/FEATURE_VALIDATION.md) / [サーバー本体の検証記録](docs/REAL_SERVER_VALIDATION.md)。すべてのMOD・パック・サーバー実装を自動的に扱える製品ではありません。
 
 ## できること
 

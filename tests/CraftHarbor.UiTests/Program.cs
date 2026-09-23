@@ -67,6 +67,15 @@ internal static class Program
                     if (((SolidColorBrush)((Grid)content).Background).Color != ((SolidColorBrush)app.Resources["Background"]).Color) throw new Exception("Local background did not update");
                     if (args.Length > 0 && key is "launch" or "appearance" or "server-settings" or "mods") SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, $"{appearance.ToLowerInvariant()}-{key}.png"));
                 }
+                var contextMenu = Descendants(content).OfType<ListBox>().First().ContextMenu!;
+                contextMenu.ApplyTemplate(); contextMenu.Measure(new Size(260, 120)); contextMenu.Arrange(new Rect(0, 0, contextMenu.DesiredSize.Width, contextMenu.DesiredSize.Height)); contextMenu.UpdateLayout();
+                if (contextMenu.Template.FindName("MenuSurface", contextMenu) is not Border surface || surface.Child is not ItemsPresenter || ((SolidColorBrush)surface.Background).Color != ((SolidColorBrush)app.Resources["Surface"]).Color) throw new Exception("Server context menu still uses the system icon gutter or incorrect theme");
+                foreach (var item in contextMenu.Items.OfType<MenuItem>())
+                {
+                    item.ApplyTemplate();
+                    if (item.Template.FindName("ItemSurface", item) is not Border chrome || ((SolidColorBrush)item.Foreground).Color != ((SolidColorBrush)app.Resources["Ink"]).Color || chrome.Background is not SolidColorBrush brush || brush.Color != Colors.Transparent) throw new Exception("Server menu item still uses system colors or icon gutter");
+                }
+                if (args.Length > 0) SaveMenuImage(contextMenu, Path.Combine(Path.GetDirectoryName(args[0])!, $"{appearance.ToLowerInvariant()}-server-menu.png"));
                 var dialog = HarborDialog.Create(null, "テーマの確認ダイアログ", "確認", MessageBoxButton.YesNo, out var result);
                 dialog.ApplyTemplate();
                 if (((SolidColorBrush)dialog.Background).Color != ((SolidColorBrush)app.Resources["Background"]).Color || result() != MessageBoxResult.No) throw new Exception("Dialog theme or safe default is incorrect");
@@ -121,6 +130,20 @@ internal static class Program
             if (autoSaved["modpackName"]!.ToString() != "日本語の同期構成" || !autoSaved["generateModpackOnStart"]!.GetValue<bool>() || autoSaved["syncedFiles"]!.AsArray().Count != 2 || autoSaved["extra"]!["unknown"]!.GetValue<int>() != 12 || autoSaved["DO_NOT_CHANGE_IT"]!.GetValue<int>() != 7) throw new Exception("MOD settings GUI changed unrelated values or failed save");
             if (Descendants(content).OfType<TextBox>().Single(t => t.Tag?.ToString() == "modpackName").Text != "日本語の同期構成") throw new Exception("MOD settings reopen failed");
             if (args.Length > 0) SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, "japanese-mod-settings.png"));
+            var detailLinks = Descendants(content).OfType<StackPanel>().Single(x => x.Name == "ServerSettingsNavigation");
+            var detailPanel = Descendants(content).OfType<StackPanel>().Single(x => x.Name == "DetailContent");
+            var leftScroll = Descendants(content).OfType<ScrollViewer>().Single(x => ReferenceEquals(x.Content, detailLinks));
+            var rightScroll = Descendants(content).OfType<ScrollViewer>().Single(x => ReferenceEquals(x.Content, detailPanel));
+            var outerScroll = (ScrollViewer)typeof(MainWindow).GetField("pageScroll", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+            if (outerScroll.VerticalScrollBarVisibility != ScrollBarVisibility.Disabled || rightScroll.ExtentHeight <= rightScroll.ViewportHeight || leftScroll.ActualHeight > outerScroll.ActualHeight + 1) throw new Exception("Settings columns do not scroll independently");
+            leftScroll.ScrollToEnd(); Layout(); var leftOffset = leftScroll.VerticalOffset;
+            if (leftOffset < 100) throw new Exception("Server settings menu did not scroll");
+            rightScroll.ScrollToEnd(); Layout();
+            if (Math.Abs(leftScroll.VerticalOffset - leftOffset) > 1) throw new Exception("Scrolling the MOD form moved the left menu");
+            if (args.Length > 0) SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, "mod-settings-scrolled.png"));
+            detailLinks.Children.OfType<Button>().Single(b => b.Name == "ServerSettingNavmods").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
+            if (!ReferenceEquals(leftScroll, Descendants(content).OfType<ScrollViewer>().Single(x => ReferenceEquals(x.Content, detailLinks))) || Math.Abs(leftScroll.VerticalOffset - leftOffset) > 1 || rightScroll.VerticalOffset > 1) throw new Exception("Selecting a settings tab reset the left menu or kept the right scroll position");
+            navigate.Invoke(window, ["modsettings"]); Layout();
             var links = Descendants(content).OfType<StackPanel>().Single(x => x.Name == "NavigationLinks");
             if (links.Children.OfType<Button>().Count() != 4 || links.Children.OfType<Button>().Any(b => b.Name is "Navappearance" or "Navmods")) throw new Exception("Primary navigation contains detail pages");
             if (Descendants(content).OfType<WrapPanel>().Any(x => x.Name is "NavigationGroups" or "SectionCategories")) throw new Exception("Old stacked navigation remains");
@@ -214,6 +237,13 @@ internal static class Program
     private static void SaveImage(FrameworkElement content, string path)
     {
         var bitmap = new RenderTargetBitmap(1240, 840, 96, 96, PixelFormats.Pbgra32); bitmap.Render(content);
+        var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!); using var stream = File.Create(path); encoder.Save(stream);
+    }
+    private static void SaveMenuImage(ContextMenu menu, string path)
+    {
+        var width = Math.Max(1, (int)Math.Ceiling(menu.ActualWidth)); var height = Math.Max(1, (int)Math.Ceiling(menu.ActualHeight));
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32); bitmap.Render(menu);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!); using var stream = File.Create(path); encoder.Save(stream);
     }
