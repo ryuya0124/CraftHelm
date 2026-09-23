@@ -126,15 +126,27 @@ internal static class Program
             File.WriteAllText(Path.Combine(autoDir, "automodpack-server.json"), "{\"modpackName\":\"before\"}");
             File.WriteAllText(Path.Combine(autoDir, "automodpack-client.json"), "{\"testPrivateData\":true}");
             navigate.Invoke(window, ["files"]); Layout();
-            ListBox ConfigList() => Descendants(content).OfType<ListBox>().Single(x => x.Name == "ConfigFiles");
+            TreeView ConfigTree() => Descendants(content).OfType<TreeView>().Single(x => x.Name == "ConfigFiles");
+            TreeViewItem[] ConfigNodes()
+            {
+                var nodes = new List<TreeViewItem>();
+                void Visit(ItemCollection items)
+                {
+                    foreach (var node in items.OfType<TreeViewItem>()) { nodes.Add(node); Visit(node.Items); }
+                }
+                Visit(ConfigTree().Items); return nodes.ToArray();
+            }
+            ConfigurationFileEntry[] ConfigEntries() => ConfigNodes().Select(x => x.Tag).OfType<ConfigurationFileEntry>().ToArray();
+            TreeViewItem ConfigFile(string path) => ConfigNodes().Single(x => x.Tag is ConfigurationFileEntry e && e.RelativePath == path);
             TextEditor ConfigEditor() => Descendants(content).OfType<TextEditor>().Single(x => x.Name == "ConfigEditor");
-            var configs = ConfigList();
-            if (!configs.Items.Cast<ConfigurationFileEntry>().Any(e => e.RelativePath == Path.Combine("automodpack", "automodpack-server.json")) || configs.Items.Cast<ConfigurationFileEntry>().Any(e => e.RelativePath.EndsWith("automodpack-client.json"))) throw new Exception("AutoModpack configuration scope incorrect");
+            var configs = ConfigTree();
+            if (!ConfigEntries().Any(e => e.RelativePath == Path.Combine("automodpack", "automodpack-server.json")) || ConfigEntries().Any(e => e.RelativePath.EndsWith("automodpack-client.json"))) throw new Exception("AutoModpack configuration scope incorrect");
             var searchFiles = Descendants(content).OfType<TextBox>().Single(x => x.Name == "ConfigSearch");
             searchFiles.Text = "automodpack"; Layout();
-            if (configs.Items.Count != 1) throw new Exception("Configuration search did not narrow the list");
+            if (ConfigEntries().Length != 1) throw new Exception("Configuration search did not narrow the list");
+            if (!ConfigNodes().Single(x => x.Tag?.ToString() == "automodpack").IsExpanded) throw new Exception("Matching configuration folder did not expand during search");
             searchFiles.Clear(); Layout();
-            configs.SelectedItem = configs.Items.Cast<ConfigurationFileEntry>().Single(e => e.RelativePath == Path.Combine("automodpack", "automodpack-server.json"));
+            ConfigFile(Path.Combine("automodpack", "automodpack-server.json")).IsSelected = true;
             if (ConfigEditor().SyntaxHighlighting?.Name != "JSON" || !ConfigEditor().ShowLineNumbers) throw new Exception("JSON highlighting or line numbers were not activated");
             if (args.Length > 0) { Layout(); SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, "dark-json.png")); }
             const string updatedAuto = "{\"modpackName\":\"日本語同期テスト\"}\n";
@@ -146,21 +158,34 @@ internal static class Program
             if (File.ReadAllText(Path.Combine(autoDir, "automodpack-server.json")) != updatedAuto || !SafeFiles.Files(Path.Combine(root, "file-history")).Any()) throw new Exception("AutoModpack save/history or newline fidelity failed");
             var extraConfigs = new[] { "config/ftb.snbt", "config/mod.json5", "defaultconfigs/create.toml", "Adventure/serverconfig/mod.toml", "kubejs/server_scripts/test.js", "scripts/test.zs" };
             foreach (var relative in extraConfigs) { var file = Path.Combine(serverDir, relative); Directory.CreateDirectory(Path.GetDirectoryName(file)!); File.WriteAllText(file, relative.EndsWith(".toml") ? "[display]\nname = \"CraftHelm\"\nenabled = true\nrate = 12.5 # test\n" : "original"); }
-            navigate.Invoke(window, ["files"]); Layout(); configs = ConfigList();
-            var groups = configs.Items.Cast<ConfigurationFileEntry>().ToDictionary(e => e.RelativePath, e => e.Category);
+            navigate.Invoke(window, ["files"]); Layout(); configs = ConfigTree();
+            var groups = ConfigEntries().ToDictionary(e => e.RelativePath, e => e.Category);
             if (groups[Path.Combine("Adventure", "serverconfig", "mod.toml")] != "ワールド" || groups[Path.Combine("scripts", "test.zs")] != "スクリプト" || groups[Path.Combine("automodpack", "automodpack-server.json")] != "AutoModpack") throw new Exception("Configuration folders were grouped incorrectly");
             var category = Descendants(content).OfType<Button>().Single(b => b.Tag?.ToString() == "MOD設定");
             category.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
-            if (configs.Items.Cast<ConfigurationFileEntry>().Any(e => e.Category != "MOD設定") || configs.Items.Count < 2) throw new Exception("Configuration category filter failed");
+            if (ConfigEntries().Any(e => e.Category != "MOD設定") || ConfigEntries().Length < 2) throw new Exception("Configuration category filter failed");
             Descendants(content).OfType<Button>().Single(b => b.Tag?.ToString() == "すべて").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
             if (args.Length > 0) SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, "dark-files.png"));
+            if (!ConfigNodes().Any(x => x.Tag?.ToString() == "config") || !ConfigNodes().Any(x => x.Tag?.ToString() == "Adventure/serverconfig")) throw new Exception("Nested configuration folders are missing");
+            var folder = ConfigNodes().Single(x => x.Tag?.ToString() == "Adventure");
+            folder.IsExpanded = false; Layout();
+            if (folder.IsExpanded) throw new Exception("Configuration folder cannot be collapsed");
+            searchFiles.Text = "server.properties"; searchFiles.Clear(); Layout();
+            if (ConfigNodes().Single(x => x.Tag?.ToString() == "Adventure").IsExpanded) throw new Exception("Collapsed configuration folder reopened after filtering");
+            ConfigNodes().Single(x => x.Tag?.ToString() == "Adventure").IsExpanded = true; Layout();
             content.Measure(new Size(980, 700)); content.Arrange(new Rect(0, 0, 980, 700)); content.UpdateLayout();
             if (ConfigEditor().ActualWidth < 200 || configs.ActualWidth < 150) throw new Exception("Configuration browser does not fit minimum window width");
+            var smallEditorHeight = ConfigEditor().ActualHeight; var smallTreeHeight = configs.ActualHeight;
+            content.Measure(new Size(2200, 1300)); content.Arrange(new Rect(0, 0, 2200, 1300)); content.UpdateLayout();
+            if (ConfigEditor().ActualHeight < smallEditorHeight + 300 || configs.ActualHeight < smallTreeHeight + 300 || ConfigEditor().ActualHeight < 650) throw new Exception("Configuration browser did not grow with window height");
+            if (configs.ActualWidth < 300) throw new Exception("Configuration tree did not grow with window width");
+            content.Measure(new Size(980, 700)); content.Arrange(new Rect(0, 0, 980, 700)); content.UpdateLayout();
+            if (ConfigEditor().ActualHeight > smallEditorHeight + 25 || configs.ActualHeight > smallTreeHeight + 25) throw new Exception("Configuration browser did not shrink with window");
             Layout();
             foreach (var relative in extraConfigs)
             {
-                var item = relative.Replace('/', Path.DirectorySeparatorChar); if (!configs.Items.Cast<ConfigurationFileEntry>().Any(e => e.RelativePath == item)) throw new Exception("Missing config " + relative);
-                configs.SelectedItem = configs.Items.Cast<ConfigurationFileEntry>().Single(e => e.RelativePath == item);
+                var item = relative.Replace('/', Path.DirectorySeparatorChar); if (!ConfigEntries().Any(e => e.RelativePath == item)) throw new Exception("Missing config " + relative);
+                ConfigFile(item).IsSelected = true;
                 if (args.Length > 0 && relative.EndsWith(".toml")) { Layout(); SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, "dark-toml.png")); }
                 ConfigEditor().Text = "edited 日本語";
                 if (ConfigEditor().SyntaxHighlighting?.Name != (relative.EndsWith(".toml") ? "TOML" : relative.EndsWith(".js") || relative.EndsWith(".zs") ? "スクリプト" : relative.EndsWith(".json5") ? "JSON" : "設定")) throw new Exception("Wrong syntax colors for " + relative);

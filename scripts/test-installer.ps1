@@ -1,4 +1,4 @@
-param([string]$Version = '0.1.15')
+param([string]$Version = '0.1.16')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $setup = Join-Path $projectRoot "artifacts\packages\CraftHelm-$Version-win-x64-setup.exe"
