@@ -18,7 +18,7 @@ public sealed class UpdateManager : IDisposable
     private long preparedSize;
     public bool Enabled { get; private set; } = true;
     public bool IsInstalled => File.Exists(Path.Combine(AppContext.BaseDirectory, "unins000.exe"));
-    public bool IsReady => prepared != null;
+    public bool IsReady => IsInstalled && prepared is { } update && File.Exists(update.Path);
     public string Status { get; private set; } = "更新はまだ確認していません。";
     public event Action? Changed;
     public UpdateManager(string root)
@@ -49,7 +49,7 @@ public sealed class UpdateManager : IDisposable
             Report("GitHub Releasesを確認しています…");
             var current = typeof(App).Assembly.GetName().Version!;
             var candidate = await releases.CheckAsync(current, timeout.Token);
-            if (candidate == null) { Report("最新版です（" + current.ToString(3) + "）。"); return; }
+            if (candidate == null) { prepared = null; Report("最新版です（" + current.ToString(3) + "）。"); return; }
             if (!IsInstalled) { Report($"v{candidate.Version}があります。GitHub Releasesのインストーラーで更新してください。"); return; }
             Report($"v{candidate.Version}をダウンロード・検証しています…");
             var cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CraftHarbor", "updates", candidate.Version);

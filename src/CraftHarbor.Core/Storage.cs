@@ -46,9 +46,12 @@ public sealed class HarborStore
     public string BackupDir(ServerProfile p) => SafeFiles.Inside(Path.Combine(Root, "backups"), p.Id);
     public string PresetDir(ServerProfile p) => SafeFiles.Inside(Path.Combine(Root, "presets"), p.Id);
     public void Save() => SafeFiles.AtomicWrite(Path.Combine(Root, "profiles.json"), JsonSerializer.Serialize(Profiles, Json));
-    public ServerProfile Add(string name)
+    public ServerProfile Add(string name, string engine = "vanilla", string version = "1.21.1", string loaderVersion = "")
     {
-        var p = new ServerProfile { Name = name };
+        if (string.IsNullOrWhiteSpace(version)) throw new InvalidOperationException("Minecraftバージョンを入力してください。");
+        if (engine is not ("vanilla" or "paper" or "fabric" or "folia" or "forge" or "neoforge" or "quilt" or "custom")) throw new InvalidOperationException("サーバーの種類が不正です。");
+        var p = new ServerProfile { Name = name.Trim(), Engine = engine, Version = version.Trim(), LoaderVersion = engine == "fabric" ? loaderVersion.Trim() : "" };
+        p.Validate();
         Directory.CreateDirectory(ServerDir(p)); Profiles.Add(p); Save(); return p;
     }
     public bool Remove(ServerProfile profile)

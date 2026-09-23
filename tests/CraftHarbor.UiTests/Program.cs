@@ -28,6 +28,25 @@ internal static class Program
                     navigate.Invoke(window, [key]); Layout();
                     Console.WriteLine($"PASS UI navigation/layout {key} round {pass + 1}");
                 }
+            var creation = new ServerCreationWindow((kind, _) => Task.FromResult(kind == "fabric" ? new[] { "1.20.1" } : new[] { "1.21.1" }));
+            creation.Show(); creation.UpdateLayout();
+            awaitVersions(creation.LoadVersionsAsync());
+            var creationControls = Descendants((DependencyObject)creation.Content);
+            var newEngine = creationControls.OfType<ComboBox>().Single(x => x.Name == "NewServerEngine");
+            var newVersion = creationControls.OfType<TextBox>().Single(x => x.Name == "NewServerVersion");
+            if (creation.Version != "1.21.1") throw new Exception("Creation version not initialized");
+            newEngine.SelectedItem = "fabric"; awaitVersions(creation.LoadVersionsAsync());
+            if (creation.Version != "1.20.1" || creation.Engine != "fabric") throw new Exception("Creation options ignored selected loader");
+            newVersion.Text = "1.19.4";
+            if (creation.Version != "1.19.4") throw new Exception("Manual version fallback failed");
+            creation.UpdateLayout();
+            if (args.Length > 0) SaveImage(creation, Path.Combine(Path.GetDirectoryName(args[0])!, "new-server.png"));
+            creation.Close();
+            navigate.Invoke(window, ["system"]); Layout();
+            if (Descendants(content).OfType<ProgressBar>().Count(x => x.Name == "SystemMeter") < 2) throw new Exception("PC dashboard meters missing");
+            navigate.Invoke(window, ["updates"]); Layout();
+            if (Descendants(content).OfType<Button>().Single(x => x.Name == "RestartUpdate").Visibility != Visibility.Collapsed) throw new Exception("Update restart shown before verified download");
+            Console.WriteLine("PASS creation loader/version, system dashboard, update button gating");
             navigate.Invoke(window, ["launch"]); Layout();
             var engine = Descendants(content).OfType<ComboBox>().Single(x => x.Name == "ServerEngine");
             var fabric = Descendants(content).OfType<StackPanel>().Single(x => x.Name == "FabricSettings");
@@ -37,7 +56,7 @@ internal static class Program
             {
                 engine.SelectedItem = kind; Layout();
                 if ((fabric.Visibility == Visibility.Visible) != (kind == "fabric")) throw new Exception("Incorrect Fabric fields for " + kind);
-                if (versionButton.IsEnabled != (kind is "vanilla" or "paper" or "folia" or "fabric")) throw new Exception("Incorrect version selector for " + kind);
+                if (versionButton.IsEnabled != (kind != "custom")) throw new Exception("Incorrect version selector for " + kind);
                 Descendants(fabric).OfType<TextBox>().Single().Text = "0.16.0";
                 saveButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 var saved = new HarborStore(root).Profiles.Single();
@@ -55,6 +74,10 @@ internal static class Program
                 Theme.Apply(appearance, true);
                 Theme.Load(root);
                 if (Theme.Appearance != appearance) throw new Exception("Theme preference did not persist");
+                var themedServerList = Descendants(content).OfType<ListBox>().Single(x => x.Name == "ServerList");
+                themedServerList.ApplyTemplate();
+                if (themedServerList.Template.FindName("ServerListSurface", themedServerList) is not Border listSurface || ((SolidColorBrush)listSurface.Background).Color != ((SolidColorBrush)app.Resources["Input"]).Color)
+                    throw new Exception("Server list background does not follow " + appearance + " theme");
                 foreach (var key in new[] { "overview", "console", "backups", "server-settings", "launch", "resources", "advanced", "install", "import", "properties", "manage", "mods", "modsearch", "presets", "modpacks", "automodpack", "modsettings", "files", "settings", "java", "system", "network", "help", "updates", "appearance" })
                 {
                     navigate.Invoke(window, [key]); Layout();
@@ -65,7 +88,7 @@ internal static class Program
                         if (box.Template.FindName("PART_Popup", box) is not System.Windows.Controls.Primitives.Popup popup || popup.Child is not Border popupBorder || ((SolidColorBrush)popupBorder.Background).Color != expected) throw new Exception("Dropdown has incorrect theme");
                     }
                     if (((SolidColorBrush)((Grid)content).Background).Color != ((SolidColorBrush)app.Resources["Background"]).Color) throw new Exception("Local background did not update");
-                    if (args.Length > 0 && key is "launch" or "appearance" or "server-settings" or "mods") SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, $"{appearance.ToLowerInvariant()}-{key}.png"));
+                    if (args.Length > 0 && key is "launch" or "appearance" or "server-settings" or "mods" or "system" or "updates") SaveImage(content, Path.Combine(Path.GetDirectoryName(args[0])!, $"{appearance.ToLowerInvariant()}-{key}.png"));
                 }
                 var contextMenu = Descendants(content).OfType<ListBox>().First().ContextMenu!;
                 contextMenu.ApplyTemplate(); contextMenu.Measure(new Size(260, 120)); contextMenu.Arrange(new Rect(0, 0, contextMenu.DesiredSize.Width, contextMenu.DesiredSize.Height)); contextMenu.UpdateLayout();
@@ -222,6 +245,7 @@ internal static class Program
             failure.Close();
             Console.WriteLine("PASS startup render-before-load, responsive dispatcher, handoff, close cancellation and failure feedback");
             Console.WriteLine("RESULT UI smoke passed; no Minecraft processes launched"); return 0;
+            static void awaitVersions(Task task) => task.GetAwaiter().GetResult();
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
         finally
