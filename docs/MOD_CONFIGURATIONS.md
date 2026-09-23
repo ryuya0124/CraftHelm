@@ -41,7 +41,7 @@ JARの構成はどちらのモードでもプリセットに合わせます。�
 
 ## 編集と軽量性
 
-対応拡張子はproperties / json / json5 / jsonc / toml / yml / yaml / txt / conf / cfg / snbt / hocon / js / zs。画面の一覧は最大500件、1ファイル1MB未満です。この表示制限はプリセットのconfig等の保存範囲には適用しません。
+対応拡張子はproperties / json / json5 / jsonc / toml / yml / yaml / txt / conf / cfg / snbt / hocon / js / zs。画面の一覧は最大500件、1ファイル1MB未満です。名前・パス検索、種類別フィルター、最近のファイルから選べます。この表示制限はプリセットのconfig等の保存範囲には適用しません。[テキスト編集の使い方](CONFIG_EDITOR.md)。
 
 JSONのみ構文を検証します。その他はテキスト編集で、MOD側が読み込むまで構文や設定値の妥当性は分かりません。保存前の原本はfile-historyへ残し、編集結果はUTF-8で保存します。プリセット内の未編集ファイルはバイト列のままコピーします。
 

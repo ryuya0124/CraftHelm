@@ -58,6 +58,12 @@
    </Border>
   </ControlTemplate></Setter.Value></Setter>
  </Style>
+ <DataTemplate x:Key="ConfigurationFileItem">
+  <StackPanel Margin="0,2">
+   <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+   <TextBlock Text="{Binding Folder}" Foreground="{DynamicResource Muted}" FontSize="11" TextTrimming="CharacterEllipsis"/>
+  </StackPanel>
+ </DataTemplate>
  <Style TargetType="ProgressBar">
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ProgressBar">
    <Grid ClipToBounds="True"><Border Background="{TemplateBinding Background}" CornerRadius="6"/><Border x:Name="PART_Track" Background="Transparent"/><Border x:Name="PART_Indicator" Background="{TemplateBinding Foreground}" CornerRadius="6" HorizontalAlignment="Left"/></Grid>
