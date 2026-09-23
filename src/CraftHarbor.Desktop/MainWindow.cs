@@ -29,6 +29,10 @@ public sealed class MainWindow : Window
     private readonly StackPanel navigationLinks = new() { Name = "NavigationLinks" };
     private Button? appSettingsButton;
     private StackPanel? detailContent;
+    private ScrollViewer? detailLinksScroll;
+    private ScrollViewer? detailRightScroll;
+    private string? detailKind;
+    private readonly Dictionary<string, double> detailOffsets = [];
     private StackPanel ContentPanel => detailContent ?? page;
     private static readonly (string Group, string Label, string Key)[] Routes = [
         ("運用", "概要", "overview"), ("運用", "コンソール", "console"), ("運用", "バックアップ", "backups"),
@@ -76,10 +80,10 @@ public sealed class MainWindow : Window
         footer.Children.Add(new TextBlock { Text = "v" + typeof(App).Assembly.GetName().Version!.ToString(3) + "  •  Windows版", FontSize = 11, Foreground = Brush("#91A3B8") });
         DockPanel.SetDock(footer, Dock.Bottom); sidebar.Children.Add(footer);
         servers.Margin = new Thickness(12, 0, 12, 8); servers.Height = 150; DockPanel.SetDock(servers, Dock.Top); sidebar.Children.Add(servers);
-        var serverMenu = new ContextMenu();
+        var serverMenu = new ContextMenu { Style = (Style)FindResource("ServerContextMenu"), Background = Brush("Surface"), Foreground = Brush("Ink"), BorderBrush = Brush("Border") };
         foreach (var (label, destination) in new[] { ("サーバー設定", "server-settings"), ("サーバーを削除…", "manage") })
         {
-            var item = new MenuItem { Header = label };
+            var item = new MenuItem { Header = label, Style = (Style)FindResource("ServerContextMenuItem"), Foreground = Brush("Ink") };
             item.Click += (_, _) => { if (Selected != null) Navigate(destination); };
             serverMenu.Items.Add(item);
         }
@@ -180,15 +184,27 @@ public sealed class MainWindow : Window
     private bool Confirm(string message) => MessageBox.Show(this, message, "CraftHelm", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
     private void Navigate(string key)
     {
-        if (busy || (mayLeave != null && !mayLeave())) return; mayLeave = null; currentPage = key; page.Children.Clear(); detailContent = null; console = null; updateStatus = null;
-        RefreshNavigation(key);
+        if (busy || (mayLeave != null && !mayLeave())) return; mayLeave = null; currentPage = key;
         var route = Routes.First(r => r.Key == key);
         var appSettings = route.Group == "アプリ設定";
         var serverSettings = route.Group is "サーバー設定" or "サーバー" or "MOD・プラグイン";
+        var nextKind = appSettings ? "app" : serverSettings && Selected != null ? "server" : null;
+        var reuseDetail = nextKind != null && detailKind == nextKind && detailContent != null;
+        if (reuseDetail)
+        {
+            detailContent!.Children.Clear(); detailRightScroll?.ScrollToTop(); RefreshDetailSelection(key);
+        }
+        else
+        {
+            if (detailKind != null && detailLinksScroll != null) detailOffsets[detailKind] = detailLinksScroll.VerticalOffset;
+            page.Children.Clear(); detailContent = null; detailLinksScroll = null; detailRightScroll = null; detailKind = null;
+            pageScroll.VerticalScrollBarVisibility = nextKind == null ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
+            pageScroll.ScrollToTop();
+            if (nextKind != null) BuildDetailNavigation(key, appSettings);
+        }
+        console = null; updateStatus = null; RefreshNavigation(key);
         title.Text = appSettings ? "アプリ設定" : Selected?.Name ?? "サーバーを追加";
         subtitle.Text = (appSettings ? "アプリ設定" : serverSettings ? "サーバー設定" : route.Group) + " › " + route.Label + (!appSettings && Selected is { } p ? $"  •  {JapaneseDisplay.Label(p.Engine)} / Minecraft {p.Version}" : "");
-        if (appSettings) BuildDetailNavigation(key, true);
-        else if (serverSettings && Selected != null) BuildDetailNavigation(key, false);
         if (key == "settings") { SettingsHomePage(); return; }
         if (key == "updates") { UpdatesPage(); return; } if (key == "java") { JavaPage(); return; } if (key == "system") { SystemPage(); return; } if (key == "network") { NetworkPage(); return; } if (key == "help") { HelpPage(); return; } if (key == "appearance") { AppearancePage(); return; }
         if (Selected == null) { Welcome(); return; }
@@ -196,11 +212,20 @@ public sealed class MainWindow : Window
     }
     private void BuildDetailNavigation(string key, bool appSettings)
     {
-        var grid = new Grid(); grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(192) }); grid.ColumnDefinitions.Add(new ColumnDefinition()); page.Children.Add(grid);
+        var kind = appSettings ? "app" : "server"; detailKind = kind;
+        var grid = new Grid(); grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(192) }); grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.SetBinding(FrameworkElement.HeightProperty, new Binding(nameof(ActualHeight)) { Source = pageScroll }); page.Children.Add(grid);
         var links = new StackPanel { Name = appSettings ? "SettingsNavigation" : "ServerSettingsNavigation", Margin = new Thickness(0, 0, 8, 0) };
         var linksScroll = new ScrollViewer { Content = links, Margin = new Thickness(0, 0, 12, 0), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
-        linksScroll.SetBinding(FrameworkElement.MaxHeightProperty, new Binding(nameof(ActualHeight)) { Source = pageScroll }); grid.Children.Add(linksScroll);
-        detailContent = new StackPanel { Name = "DetailContent" }; Grid.SetColumn(detailContent, 1); grid.Children.Add(detailContent);
+        detailLinksScroll = linksScroll; grid.Children.Add(linksScroll);
+        if (detailOffsets.TryGetValue(kind, out var offset) && offset > 0)
+        {
+            void Restore(object sender, RoutedEventArgs e) { linksScroll.Loaded -= Restore; linksScroll.ScrollToVerticalOffset(offset); }
+            linksScroll.Loaded += Restore;
+        }
+        detailContent = new StackPanel { Name = "DetailContent" };
+        detailRightScroll = new ScrollViewer { Content = detailContent, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        Grid.SetColumn(detailRightScroll, 1); grid.Children.Add(detailRightScroll);
         var groups = appSettings ? new[] { "アプリ設定" } : new[] { "サーバー設定", "サーバー", "MOD・プラグイン" };
         foreach (var group in groups)
         {
@@ -209,9 +234,20 @@ public sealed class MainWindow : Window
             {
                 var button = Btn(route.Label, () => Navigate(route.Key), route.Key == key);
                 button.Name = (appSettings ? "SettingNav" : "ServerSettingNav") + route.Key.Replace("-", "");
+                button.Tag = route.Key;
                 button.HorizontalAlignment = HorizontalAlignment.Stretch; button.HorizontalContentAlignment = HorizontalAlignment.Left;
                 button.Margin = new Thickness(0, 2, 0, 2); links.Children.Add(button);
             }
+        }
+    }
+    private void RefreshDetailSelection(string key)
+    {
+        if (detailLinksScroll?.Content is not StackPanel links) return;
+        foreach (var button in links.Children.OfType<Button>())
+        {
+            var active = button.Tag?.ToString() == key;
+            button.Background = Brush(active ? "Accent" : "Button");
+            button.Foreground = Brush(active ? "AccentInk" : "Ink");
         }
     }
     private void SettingsHomePage()
