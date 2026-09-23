@@ -26,6 +26,17 @@ Task Sync(Action action) { action(); return Task.CompletedTask; }
 string Temp(string name) => Path.Combine(root, name);
 
 await Test("Storage roundtrip, Unicode and atomic writes", () => Sync(() => { var store = new HarborStore(Temp("store")); var p = store.Add("日本語のワールド"); p.JvmArgs = ["-Dname=a b"]; store.Save(); var again = new HarborStore(Temp("store")); Check(again.Profiles[0].Name == p.Name && again.Profiles[0].JvmArgs[0] == "-Dname=a b"); Check(!Directory.EnumerateFiles(Temp("store"), "*.partial").Any()); }));
+await Test("New server stores selected loader and version together", () => Sync(() =>
+{
+    var store = new HarborStore(Temp("new-server"));
+    var fabric = store.Add(" Fabric の世界 ", "fabric", "1.20.1", "0.16.0");
+    var neo = store.Add("NeoForge", "neoforge", "1.21.1", "unused");
+    var saved = new HarborStore(store.Root).Profiles;
+    Check(saved.Single(p => p.Id == fabric.Id).Name == "Fabric の世界" && saved.Single(p => p.Id == fabric.Id).LoaderVersion == "0.16.0");
+    Check(saved.Single(p => p.Id == neo.Id).Engine == "neoforge" && saved.Single(p => p.Id == neo.Id).Version == "1.21.1" && saved.Single(p => p.Id == neo.Id).LoaderVersion == "");
+    Throws<InvalidOperationException>(() => store.Add("invalid", "fabric", ""));
+    Check(store.Profiles.Count == 2);
+}));
 await Test("Corrupt configuration is never silently replaced", () => Sync(() => { Directory.CreateDirectory(Temp("corrupt")); File.WriteAllText(Temp("corrupt/profiles.json"), "invalid"); Throws<System.Text.Json.JsonException>(() => new HarborStore(Temp("corrupt"))); Check(File.ReadAllText(Temp("corrupt/profiles.json")) == "invalid"); }));
 await Test("Reject traversal, absolute paths and NTFS streams", () => Sync(() => { foreach (var bad in new[] { "../outside", "..\\outside", "C:\\outside", "file:stream", "" }) Throws<IOException>(() => SafeFiles.Inside(root, bad)); }));
 await Test("Memory / port validation", () => Sync(() => { Throws<InvalidOperationException>(() => new ServerProfile { MinMemoryMb = 2048, MaxMemoryMb = 512 }.Validate()); Throws<InvalidOperationException>(() => new ServerProfile { Port = 65536 }.Validate()); }));
@@ -89,6 +100,9 @@ await Test("Version candidates use selected engine and exclude snapshots", async
         var json = url.Contains("version_manifest") ? """{"versions":[{"id":"1.21.1","type":"release"},{"id":"24w01a","type":"snapshot"},{"id":"1.20.1","type":"release"},{"id":"1.12.2","type":"release"}]}"""
             : url.Contains("fabricmc") ? """[{"version":"1.21.1","stable":true},{"version":"24w01a","stable":false}]"""
             : url.EndsWith("/paper") ? """{"versions":{"1.21":["1.21.1","1.21.1"],"1.20":["1.20.1"]}}"""
+            : url.Contains("quiltmc") ? """[{"version":"1.21.1","stable":true},{"version":"1.12.2","stable":false}]"""
+            : url.Contains("minecraftforge") ? """<metadata><versioning><versions><version>1.21.1-52.0.1</version><version>1.20.1-47.0.0</version></versions></versioning></metadata>"""
+            : url.Contains("neoforged") ? """{"versions":["21.1.1","20.1.100","0.25w14craftmine.3-beta"]}"""
             : """{"versions":{"1.20":["1.20.1"]}}""";
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) };
     }));
@@ -96,8 +110,11 @@ await Test("Version candidates use selected engine and exclude snapshots", async
     Check((await d.ServerVersions("fabric", default)).SequenceEqual(new[] { "1.21.1" }));
     Check((await d.ServerVersions("paper", default)).SequenceEqual(new[] { "1.21.1", "1.20.1" }));
     Check((await d.ServerVersions("folia", default)).SequenceEqual(new[] { "1.20.1" }));
+    Check((await d.ServerVersions("quilt", default)).SequenceEqual(new[] { "1.21.1" }));
+    Check((await d.ServerVersions("forge", default)).SequenceEqual(new[] { "1.21.1", "1.20.1" }));
+    Check((await d.ServerVersions("neoforge", default)).SequenceEqual(new[] { "1.21.1", "1.20.1" }));
     var count = requests.Count;
-    foreach (var kind in new[] { "forge", "neoforge", "quilt", "custom" }) await ThrowsAsync<NotSupportedException>(() => d.ServerVersions(kind, default));
+    await ThrowsAsync<NotSupportedException>(() => d.ServerVersions("custom", default));
     Check(requests.Count == count, "Manual engines must not fetch Vanilla candidates");
 });
 await Test("Real Windows directory lock: restore waits, then succeeds without data loss", async () =>

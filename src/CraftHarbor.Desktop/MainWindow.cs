@@ -20,6 +20,7 @@ public sealed class MainWindow : Window
     private readonly HarborStore store;
     private readonly UpdateManager updater;
     private TextBlock? updateStatus;
+    private Button? restartUpdateButton;
     private bool restartForUpdate;
     private readonly Downloads downloads = new();
     private readonly Dictionary<string, ServerRuntime> runtimes = [];
@@ -64,7 +65,7 @@ public sealed class MainWindow : Window
     public MainWindow(string root) : this(new HarborStore(root)) { }
     public MainWindow(HarborStore loadedStore)
     {
-        store = loadedStore; updater = new UpdateManager(store.Root); updater.Changed += () => { if (updateStatus != null) updateStatus.Text = updater.Status; }; Theme.Load(store.Root); Style = (Style)FindResource(typeof(Window)); Theme.Attach(this);
+        store = loadedStore; updater = new UpdateManager(store.Root); updater.Changed += () => { if (updateStatus != null) updateStatus.Text = updater.Status; if (restartUpdateButton != null) restartUpdateButton.Visibility = updater.IsReady ? Visibility.Visible : Visibility.Collapsed; }; Theme.Load(store.Root); Style = (Style)FindResource(typeof(Window)); Theme.Attach(this);
         Title = "CraftHelm — Minecraft Server Manager"; Width = 1240; Height = 840; MinWidth = 980; MinHeight = 700; WindowStartupLocation = WindowStartupLocation.CenterScreen;
         var layout = new Grid { Background = Brush("#0D141F") }; layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(240) }); layout.ColumnDefinitions.Add(new ColumnDefinition()); Content = layout;
         var sidebar = new DockPanel { Background = Brush("#111B29"), Margin = new Thickness(0) }; layout.Children.Add(sidebar);
@@ -79,6 +80,7 @@ public sealed class MainWindow : Window
         appSettingsButton = Btn("アプリ設定", () => Navigate("settings")); footer.Children.Add(appSettingsButton);
         footer.Children.Add(new TextBlock { Text = "v" + typeof(App).Assembly.GetName().Version!.ToString(3) + "  •  Windows版", FontSize = 11, Foreground = Brush("#91A3B8") });
         DockPanel.SetDock(footer, Dock.Bottom); sidebar.Children.Add(footer);
+        servers.Name = "ServerList"; servers.Style = (Style)FindResource("ServerListStyle");
         servers.Margin = new Thickness(12, 0, 12, 8); servers.Height = 150; DockPanel.SetDock(servers, Dock.Top); sidebar.Children.Add(servers);
         var serverMenu = new ContextMenu { Style = (Style)FindResource("ServerContextMenu"), Background = Brush("Surface"), Foreground = Brush("Ink"), BorderBrush = Brush("Border") };
         foreach (var (label, destination) in new[] { ("サーバー設定", "server-settings"), ("サーバーを削除…", "manage") })
@@ -202,7 +204,7 @@ public sealed class MainWindow : Window
             pageScroll.ScrollToTop();
             if (nextKind != null) BuildDetailNavigation(key, appSettings);
         }
-        console = null; updateStatus = null; RefreshNavigation(key);
+        console = null; updateStatus = null; restartUpdateButton = null; RefreshNavigation(key);
         title.Text = appSettings ? "アプリ設定" : Selected?.Name ?? "サーバーを追加";
         subtitle.Text = (appSettings ? "アプリ設定" : serverSettings ? "サーバー設定" : route.Group) + " › " + route.Label + (!appSettings && Selected is { } p ? $"  •  {JapaneseDisplay.Label(p.Engine)} / Minecraft {p.Version}" : "");
         if (key == "settings") { SettingsHomePage(); return; }
@@ -272,8 +274,10 @@ public sealed class MainWindow : Window
     }
     private void AddServer()
     {
-        var name = Ask("サーバー名", "マイサーバー"); if (string.IsNullOrWhiteSpace(name)) return;
-        var p = store.Add(name); RefreshServers(p); Navigate("launch");
+        var dialog = new ServerCreationWindow(downloads.ServerVersions) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        var p = store.Add(dialog.ServerName, dialog.Engine, dialog.Version, dialog.LoaderVersion);
+        RefreshServers(p); Navigate("launch");
     }
     private void ManagePage()
     {
@@ -387,12 +391,13 @@ public sealed class MainWindow : Window
         {
             var selectedEngine = engine.SelectedItem?.ToString() ?? "custom";
             fabricFields.Visibility = selectedEngine == "fabric" ? Visibility.Visible : Visibility.Collapsed;
-            versionButton.IsEnabled = selectedEngine is "vanilla" or "fabric" or "paper" or "folia";
+            versionButton.IsEnabled = selectedEngine != "custom";
             versionHint.Text = selectedEngine switch
             {
                 "fabric" => "Fabric対応のMinecraftリリースを表示します。",
                 "paper" or "folia" => "配布元に存在するMinecraftバージョンを表示します。安定ビルドの有無は導入時に確認します。",
                 "vanilla" => "VanillaのMinecraftリリースを表示します。Fabricローダーの設定は使用しません。",
+                "forge" or "neoforge" or "quilt" => "配布元に存在するMinecraftバージョンを表示します。サーバー本体はフォルダから取り込みます。",
                 _ => "手動取り込み用です。導入済みサーバーのMinecraftバージョンを入力してください。"
             };
         }
@@ -760,7 +765,8 @@ public sealed class MainWindow : Window
     }
     private void SystemPage()
     {
-        var card = Card(ContentPanel, "このPCの状態"); var info = new TextBox { Text = Diagnostics.Describe(), IsReadOnly = true, AcceptsReturn = true, Height = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }; card.Children.Add(info); card.Children.Add(Btn("更新", () => info.Text = Diagnostics.Describe()));
+        SystemDashboard.Build(ContentPanel);
+        ContentPanel.Children.Add(Btn("PC情報を更新", () => Navigate("system")));
     }
     private void NetworkPage()
     {
@@ -797,13 +803,36 @@ public sealed class MainWindow : Window
         enabled.Click += (_, _) => { try { updater.SetEnabled(enabled.IsChecked == true); } catch (Exception ex) { Error(ex); } }; card.Children.Add(enabled);
         updateStatus = Text(updater.Status); card.Children.Add(updateStatus);
         card.Children.Add(AsyncBtn("今すぐ更新を確認", async _ => await updater.CheckAsync()));
-        card.Children.Add(Btn("更新してアプリを再起動", () =>
-        {
-            if (!updater.IsReady) { status.Text = "更新のダウンロードが完了していません。"; return; }
-            restartForUpdate = true; Close(); restartForUpdate = false;
-        }, true));
+        restartUpdateButton = Btn("更新してアプリを再起動", () => _ = RestartForUpdateAsync(), true);
+        restartUpdateButton.Name = "RestartUpdate";
+        restartUpdateButton.Visibility = updater.IsReady ? Visibility.Visible : Visibility.Collapsed;
+        card.Children.Add(restartUpdateButton);
         card.Children.Add(Btn("リリース情報", () => Open("https://github.com/ryuya0124/CraftHelm/releases")));
         card.Children.Add(Text("プレビューリリースも対象です。ZIP版は確認のみで、インストーラーから更新できます。通信に失敗してもサーバー管理は継続できます。", 12));
+    }
+    private async Task RestartForUpdateAsync()
+    {
+        if (busy || !updater.IsReady) return;
+        var active = store.Profiles.Where(p => runtimes.TryGetValue(p.Id, out var runtime) && runtime.Running).ToArray();
+        if (runtimes.Values.Any(r => r.Busy)) { status.Text = "サーバーの処理完了を待ってください。"; return; }
+        var message = active.Length == 0
+            ? "更新を適用してCraftHelmを再起動しますか？"
+            : "CraftHelmから起動した以下のサーバーが稼働中です。安全に停止してから更新・再起動しますか？\n\n" + string.Join("\n", active.Select(p => "・" + p.Name));
+        if (!Confirm(message)) return;
+        if (active.Length > 0)
+        {
+            var stopped = false;
+            await Run(async _ =>
+            {
+                foreach (var p in active) await runtimes[p.Id].StopAsync();
+                stopped = true;
+            });
+            if (!stopped) return;
+        }
+        if (busy || runtimes.Values.Any(r => r.Busy || r.Running)) return;
+        restartForUpdate = true;
+        try { Close(); }
+        finally { restartForUpdate = false; }
     }
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
+using System.Xml.Linq;
 
 namespace CraftHarbor.Core;
 
@@ -62,6 +63,19 @@ public sealed class Downloads : IDisposable
             case "paper": case "folia":
                 var project = await Json($"https://fill.papermc.io/v3/projects/{engine}", ct);
                 supported = project["versions"]!.AsObject().SelectMany(group => group.Value!.AsArray()).Select(n => n!.ToString());
+                break;
+            case "quilt":
+                var quilt = await Json("https://meta.quiltmc.org/v3/versions/game", ct);
+                supported = quilt.AsArray().Where(n => (bool?)n!["stable"] == true).Select(n => n!["version"]!.ToString());
+                break;
+            case "forge":
+                var xml = await http.GetStringAsync("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml", ct);
+                supported = XDocument.Parse(xml).Descendants("version").Select(n => n.Value.Split('-')[0]);
+                break;
+            case "neoforge":
+                var neo = await Json("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge", ct);
+                supported = neo["versions"]!.AsArray().Select(n => n!.ToString().Split('.')).Where(parts => parts.Length >= 3 && int.TryParse(parts[0], out var major) && major >= 20)
+                    .Select(parts => int.Parse(parts[0]) >= 26 ? $"{parts[0]}.{parts[1]}" : $"1.{parts[0]}.{parts[1]}");
                 break;
             default:
                 throw new NotSupportedException("この種類は導入済みサーバーに合わせてMinecraftバージョンを入力してください。");

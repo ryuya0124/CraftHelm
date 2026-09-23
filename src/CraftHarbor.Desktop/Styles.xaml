@@ -51,6 +51,18 @@
   </ControlTemplate></Setter.Value></Setter>
  </Style>
  <Style TargetType="ListBox"><Setter Property="Background" Value="{DynamicResource Input}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="8"/><Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/></Style>
+ <Style x:Key="ServerListStyle" TargetType="ListBox" BasedOn="{StaticResource {x:Type ListBox}}">
+  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBox">
+   <Border x:Name="ServerListSurface" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="8">
+    <ScrollViewer Focusable="False" CanContentScroll="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><ItemsPresenter/></ScrollViewer>
+   </Border>
+  </ControlTemplate></Setter.Value></Setter>
+ </Style>
+ <Style TargetType="ProgressBar">
+  <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ProgressBar">
+   <Grid ClipToBounds="True"><Border Background="{TemplateBinding Background}" CornerRadius="6"/><Border x:Name="PART_Track" Background="Transparent"/><Border x:Name="PART_Indicator" Background="{TemplateBinding Foreground}" CornerRadius="6" HorizontalAlignment="Left"/></Grid>
+  </ControlTemplate></Setter.Value></Setter>
+ </Style>
  <Style TargetType="ListBoxItem"><Setter Property="Padding" Value="10"/><Setter Property="Margin" Value="0,2"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Border x:Name="Item" Padding="{TemplateBinding Padding}" BorderThickness="1" BorderBrush="Transparent" CornerRadius="6"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="{DynamicResource Selected}"/></Trigger><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Item" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Item" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
  <Style TargetType="CheckBox">
   <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Margin" Value="0,8,0,14"/>
